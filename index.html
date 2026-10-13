@@ -1,0 +1,1440 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="프롬프터">
+<meta name="theme-color" content="#0e0e10">
+<title>싱크 프롬프터</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap">
+<style>
+/* 다크 고정 디자인: 촬영용 프롬프터는 어두운 화면이 기본 */
+:root {
+  color-scheme: dark;
+  --warn: #e6d36a;
+  --ui-bg: #0e0e10;
+  --ui-panel: #17171b;
+  --ui-panel-2: #1f1f25;
+  --ui-border: #2c2c34;
+  --ui-text: #ececf1;
+  --ui-muted: #8b8b98;
+  --accent: #7c5cff;
+  --accent-soft: rgba(124, 92, 255, .18);
+  --guide: #f5a623;
+  --ok: #3ddc84;
+  --danger: #ff5c5c;
+
+  /* 프롬프터 (설정에서 바뀜) */
+  --p-bg: #0b0b0c;
+  --p-text: #ffffff;
+  --p-size: 56px;
+  --p-lh: 1.6;
+  --p-ls: 0em;
+  --p-weight: 500;
+  --p-margin: 8%;
+  --p-align: center;
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--ui-bg);
+  color: var(--ui-text);
+  font-family: "Noto Sans KR", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  font-size: 14px;
+  overflow: hidden;
+}
+.hidden { display: none !important; }
+.muted { color: var(--ui-muted); }
+.small { font-size: 12px; }
+.spacer { flex: 1; }
+
+/* ---------- 공통 버튼 ---------- */
+.btn {
+  appearance: none; border: 1px solid var(--ui-border); background: var(--ui-panel-2);
+  color: var(--ui-text); border-radius: 10px; padding: 8px 14px; font: inherit; cursor: pointer;
+  white-space: nowrap; transition: background .15s, border-color .15s, transform .05s;
+  user-select: none; -webkit-user-select: none;
+}
+.btn:hover { background: #2a2a32; }
+.btn:active { transform: scale(.96); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.btn.primary:hover { background: #8f73ff; }
+.btn.ghost { background: transparent; }
+.btn.ghost:hover { background: var(--ui-panel-2); }
+.btn.danger { color: var(--danger); }
+.btn.small { padding: 6px 12px; font-size: 13px; }
+.btn.icon { width: 40px; height: 40px; padding: 0; display: grid; place-items: center; font-size: 18px; }
+.btn.mini { width: 30px; height: 30px; padding: 0; display: grid; place-items: center; font-size: 16px; border-radius: 8px; }
+.btn.round { width: 52px; height: 52px; border-radius: 50%; padding: 0; display: grid; place-items: center;
+  background: var(--accent); border-color: var(--accent); color: #fff; font-size: 18px; }
+.btn.round.playing { background: #fff; border-color: #fff; color: #111; }
+.btn.chip { padding: 6px 10px; font-size: 12px; border-radius: 999px; }
+.btn.on { background: var(--accent-soft); border-color: var(--accent); color: #cbbdff; }
+
+.pill { min-width: 56px; text-align: center; padding: 4px 10px; border-radius: 999px; background: var(--ui-panel-2);
+  border: 1px solid var(--ui-border); font-variant-numeric: tabular-nums; font-weight: 600; font-size: 13px; }
+.pill.accent { background: var(--accent-soft); border-color: #4a3a99; color: #cbbdff; }
+
+input[type=range] { -webkit-appearance: none; appearance: none; height: 4px; background: var(--ui-border); border-radius: 4px; outline: none; width: 140px; }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%;
+  background: #fff; border: 4px solid var(--accent); cursor: pointer; }
+input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 4px solid var(--accent); }
+
+.progress { height: 4px; background: var(--ui-border); border-radius: 4px; overflow: hidden; }
+.progress-fill { height: 100%; width: 0; background: var(--accent); }
+.progress.seekable { height: 8px; cursor: pointer; }
+.progress.thin { height: 3px; margin-top: 4px; }
+
+/* ---------- 연결 상태 ---------- */
+.conn { display: inline-flex; align-items: center; gap: 8px; background: transparent; border: 1px solid var(--ui-border);
+  color: var(--ui-muted); border-radius: 999px; padding: 6px 12px; font: inherit; cursor: pointer; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: #666; flex: none; }
+.dot.on { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+.dot.off { background: var(--danger); }
+
+/* ---------- 편집 화면 ---------- */
+.view { position: fixed; inset: 0; display: flex; flex-direction: column; }
+.topbar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--ui-border);
+  padding-top: max(12px, env(safe-area-inset-top)); flex-wrap: wrap; }
+.brand { font-weight: 800; letter-spacing: -.02em; color: #cbbdff; }
+.script-picker { display: flex; gap: 8px; align-items: center; }
+select { background: var(--ui-panel-2); color: var(--ui-text); border: 1px solid var(--ui-border); border-radius: 10px;
+  padding: 8px 10px; font: inherit; max-width: 240px; }
+
+.editor-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; max-width: 980px; width: 100%; margin: 0 auto; padding: 20px 20px 0; }
+.title-input { background: transparent; border: 0; color: var(--ui-text); font: inherit; font-size: 26px; font-weight: 700;
+  outline: none; padding: 4px 0 12px; }
+.format-bar { display: flex; align-items: center; gap: 6px; padding: 8px; background: var(--ui-panel); border: 1px solid var(--ui-border);
+  border-radius: 12px; flex-wrap: wrap; }
+.fmt { min-width: 34px; height: 34px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--ui-text);
+  font: inherit; font-size: 15px; cursor: pointer; }
+.fmt.wide { padding: 0 10px; font-size: 13px; }
+.fmt:hover { background: var(--ui-panel-2); border-color: var(--ui-border); }
+.swatch { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--ui-panel); outline: 1px solid var(--ui-border);
+  background: var(--c); cursor: pointer; margin: 0 2px; }
+.sep { width: 1px; height: 22px; background: var(--ui-border); margin: 0 4px; }
+
+.editor-scroll { flex: 1; overflow-y: auto; position: relative; margin-top: 12px; padding: 0 0 120px 28px; -webkit-overflow-scrolling: touch; }
+.editor { outline: none; font-size: 19px; line-height: 1.75; min-height: 60vh; padding: 8px 4px; caret-color: var(--accent); }
+.editor h1, .editor h2, .editor h3 { font-size: 22px; margin: 18px 0 6px; color: #cbbdff; }
+.editor h1::before, .editor h2::before, .editor h3::before { content: "개요 · "; font-size: 12px; color: var(--ui-muted); font-weight: 500; vertical-align: middle; }
+.editor:empty::before { content: "여기에 대본을 붙여 넣거나 입력하세요…"; color: var(--ui-muted); }
+.editor-marker { position: absolute; left: 4px; top: 0; color: var(--guide); font-size: 14px; transition: top .25s ease; pointer-events: none; }
+
+.remote { display: flex; align-items: center; gap: 16px; padding: 12px 20px; border-top: 1px solid var(--ui-border); background: var(--ui-panel);
+  padding-bottom: max(12px, env(safe-area-inset-bottom)); flex-wrap: wrap; }
+.remote-progress { flex: 1; min-width: 200px; }
+.time-row { display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; margin-bottom: 6px; font-size: 13px; }
+.ctl { display: flex; align-items: center; gap: 8px; }
+.ctl label { color: var(--ui-muted); font-size: 12px; white-space: nowrap; }
+
+/* ---------- 프롬프터 화면 ---------- */
+#prompterView { background: var(--p-bg); }
+.stage { position: absolute; inset: 0; overflow: hidden; touch-action: none; cursor: grab; }
+.stage:active { cursor: grabbing; }
+.mirror-box { position: absolute; inset: 0; }
+.content {
+  position: absolute; left: 0; right: 0; top: 0;
+  padding: 0 var(--p-margin);
+  color: var(--p-text); font-size: var(--p-size); line-height: var(--p-lh); letter-spacing: var(--p-ls);
+  font-weight: var(--p-weight); text-align: var(--p-align); will-change: transform; word-break: keep-all; overflow-wrap: anywhere;
+  user-select: none; -webkit-user-select: none;
+}
+.content > * { margin: 0; }
+.content h1, .content h2, .content h3 { font-size: 1.05em; font-weight: 800; margin-top: .6em; }
+.content .tail { height: 100vh; }
+.guide { position: absolute; left: 0; right: 0; height: 2px; background: var(--guide); box-shadow: 0 0 10px rgba(245,166,35,.5); pointer-events: none; }
+.guide::before, .guide::after { content: ""; position: absolute; top: -7px; border: 8px solid transparent; }
+.guide::before { left: 0; border-left-color: var(--guide); }
+.guide::after { right: 0; border-right-color: var(--guide); }
+.dim { position: absolute; left: 0; right: 0; background: var(--p-bg); pointer-events: none; }
+.dim-top { top: 0; -webkit-mask-image: linear-gradient(to bottom, #000 70%, transparent); mask-image: linear-gradient(to bottom, #000 70%, transparent); }
+.dim-bottom { bottom: 0; -webkit-mask-image: linear-gradient(to top, #000 70%, transparent); mask-image: linear-gradient(to top, #000 70%, transparent); }
+
+.p-top { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: flex-start; justify-content: space-between;
+  padding: 16px 20px; padding-top: max(16px, env(safe-area-inset-top)); pointer-events: none; }
+.p-top > * { pointer-events: auto; }
+.timer-pill { background: rgba(23,23,27,.85); border: 1px solid var(--ui-border); border-radius: 12px; padding: 6px 16px 8px;
+  text-align: center; min-width: 120px; font-variant-numeric: tabular-nums; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+.timer-pill .elapsed { color: #cbbdff; font-weight: 700; font-size: 15px; margin-right: 6px; }
+.small-conn { cursor: default; background: rgba(23,23,27,.85); font-size: 12px; }
+
+.outline { position: absolute; right: 16px; top: 80px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; max-height: 60vh; }
+.outline-list { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
+.outline.collapsed .outline-list { display: none; }
+.outline.collapsed #outlineToggle { transform: rotate(180deg); }
+.outline-item { width: 140px; text-align: center; padding: 10px; border-radius: 10px; background: rgba(23,23,27,.85);
+  border: 1px solid var(--ui-border); color: var(--ui-text); font: inherit; font-size: 13px; cursor: pointer; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.outline-item.active { border-color: var(--accent); background: var(--accent-soft); color: #fff; }
+
+.p-bar { position: absolute; left: 50%; transform: translateX(-50%); bottom: max(16px, env(safe-area-inset-bottom));
+  display: flex; align-items: center; gap: 12px; padding: 8px 14px 8px 8px; background: rgba(23,23,27,.92); border: 1px solid var(--ui-border);
+  border-radius: 999px; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); max-width: calc(100vw - 24px); flex-wrap: nowrap; overflow-x: auto; }
+.p-bar input[type=range] { width: 120px; }
+.vsep { width: 1px; height: 26px; background: var(--ui-border); flex: none; }
+.auto-hide { transition: opacity .35s; }
+body.ui-hidden .auto-hide { opacity: 0; pointer-events: none; }
+body.ui-hidden .auto-hide * { pointer-events: none; }
+body.ui-hidden .stage { cursor: none; }
+
+.countdown { position: absolute; inset: 0; display: grid; place-items: center; font-size: 28vh; font-weight: 800; color: var(--accent);
+  pointer-events: none; text-shadow: 0 0 40px rgba(124,92,255,.5); }
+.end-badge { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 12px 22px; border-radius: 999px;
+  background: var(--ui-panel); border: 1px solid var(--ui-border); color: var(--ui-muted); pointer-events: none; }
+
+/* ---------- 설정 패널 ---------- */
+.backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 40; }
+.settings { position: fixed; top: 0; right: 0; bottom: 0; width: min(380px, 100vw); background: var(--ui-panel); border-left: 1px solid var(--ui-border);
+  z-index: 50; overflow-y: auto; padding: 20px; padding-top: max(20px, env(safe-area-inset-top)); padding-bottom: 60px; -webkit-overflow-scrolling: touch; }
+.settings-head { display: flex; align-items: center; justify-content: space-between; }
+.settings h3 { margin: 0; font-size: 18px; }
+.settings h4 { margin: 24px 0 8px; font-size: 12px; color: var(--accent); letter-spacing: .08em; }
+.settings .row { display: flex; justify-content: space-between; align-items: center; margin: 14px 0 8px; gap: 12px; }
+.settings input[type=range] { width: 100%; }
+.row-ctl { display: flex; align-items: center; gap: 8px; }
+.row-ctl input { flex: 1; }
+.val { font-variant-numeric: tabular-nums; font-weight: 600; color: #cbbdff; }
+.presets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.local-tag { font-size: 10px; padding: 2px 6px; border-radius: 6px; background: #2b2b10; color: #e6d36a; margin-left: 4px; vertical-align: middle; }
+.seg { display: flex; background: var(--ui-panel-2); border: 1px solid var(--ui-border); border-radius: 10px; padding: 3px; gap: 3px; }
+.seg button { flex: 1; border: 0; background: transparent; color: var(--ui-muted); padding: 8px 4px; border-radius: 7px; font: inherit; font-size: 12px; cursor: pointer; }
+.seg button.on { background: var(--accent); color: #fff; }
+.switch { position: relative; width: 44px; height: 26px; flex: none; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.switch span { position: absolute; inset: 0; background: var(--ui-border); border-radius: 999px; transition: .2s; cursor: pointer; }
+.switch span::after { content: ""; position: absolute; left: 3px; top: 3px; width: 20px; height: 20px; background: #fff; border-radius: 50%; transition: .2s; }
+.switch input:checked + span { background: var(--accent); }
+.switch input:checked + span::after { transform: translateX(18px); }
+.keys div { margin: 6px 0; }
+kbd { display: inline-block; padding: 1px 6px; border: 1px solid var(--ui-border); border-bottom-width: 2px; border-radius: 5px; font-family: inherit;
+  font-size: 11px; color: var(--ui-text); margin-right: 2px; }
+
+/* ---------- 모달/토스트 ---------- */
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: grid; place-items: center; z-index: 60; padding: 16px; }
+.modal-card { background: var(--ui-panel); border: 1px solid var(--ui-border); border-radius: 16px; padding: 24px; width: min(460px, 100%); }
+.modal-card h3 { margin-top: 0; }
+.modal-card ol { padding-left: 20px; line-height: 1.8; }
+.urls { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+.url { font-size: 20px; font-weight: 700; color: #cbbdff; background: var(--ui-panel-2); border: 1px solid var(--ui-border); border-radius: 10px;
+  padding: 12px; text-align: center; user-select: all; -webkit-user-select: all; }
+.peer-list { margin: 12px 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.peer { font-size: 12px; padding: 4px 10px; border-radius: 999px; background: var(--ui-panel-2); border: 1px solid var(--ui-border); }
+.peer.me { border-color: var(--accent); }
+.toast { position: fixed; left: 50%; top: 20px; transform: translateX(-50%); background: var(--ui-panel); border: 1px solid var(--ui-border);
+  padding: 10px 16px; border-radius: 10px; z-index: 70; }
+
+@media (max-width: 900px) {
+  .p-bar label { display: none; }
+  .p-bar input[type=range] { width: 90px; }
+  .remote .ctl input[type=range] { width: 100px; }
+}
+
+.warn { color: var(--warn); background: #2b2b10; border-radius: 10px; padding: 10px 12px; }
+.pair { display: flex; gap: 16px; align-items: center; margin: 16px 0; flex-wrap: wrap; }
+.qr { background: #fff; padding: 8px; border-radius: 10px; line-height: 0; flex: none; }
+.qr img, .qr canvas { display: block; }
+.pair-info { flex: 1; min-width: 180px; display: flex; flex-direction: column; gap: 6px; }
+.code { font-size: 34px; font-weight: 800; letter-spacing: .12em; color: #cbbdff; font-variant-numeric: tabular-nums; }
+.link-row { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.pair-link { font-size: 11px; color: var(--ui-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; user-select: all; -webkit-user-select: all; }
+.join { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 16px; }
+.join-row { display: flex; gap: 8px; }
+.code-input { flex: 1; min-width: 0; background: var(--ui-panel-2); border: 1px solid var(--ui-border); color: var(--ui-text); border-radius: 10px;
+  padding: 10px 12px; font: inherit; font-size: 18px; letter-spacing: .1em; text-transform: uppercase; }
+.code-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.error { color: var(--danger); min-height: 1em; }
+.modal-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
+.modal-card { max-height: calc(100vh - 32px); overflow-y: auto; }
+.empty-note { color: var(--ui-muted); font-size: .6em; }
+html, body { height: 100%; }
+
+</style>
+</head>
+<body>
+
+<!-- ================= 편집 화면 ================= -->
+<section id="editorView" class="view">
+  <header class="topbar">
+    <div class="brand">● 싱크 프롬프터</div>
+    <div class="script-picker">
+      <select id="scriptSelect" title="대본 선택"></select>
+      <button id="newScript" class="btn ghost" title="새 대본">＋ 새 대본</button>
+      <button id="deleteScript" class="btn ghost danger" title="대본 삭제">삭제</button>
+    </div>
+    <div class="spacer"></div>
+    <button id="connInfoBtn" class="conn" title="아이패드 연결 방법">
+      <span class="dot"></span><span class="conn-text">연결 중…</span>
+    </button>
+    <button class="btn ghost settings-open" title="상세 설정">⚙︎ 설정</button>
+    <button id="openPrompter" class="btn primary">프롬프터 열기 ▶</button>
+  </header>
+
+  <div class="editor-wrap">
+    <input id="titleInput" class="title-input" placeholder="대본 제목">
+    <div class="format-bar">
+      <button data-cmd="heading" class="fmt wide" title="선택한 줄을 개요(목차)로">개요</button>
+      <button data-cmd="body" class="fmt wide" title="본문으로">본문</button>
+      <span class="sep"></span>
+      <button data-cmd="bold" class="fmt" title="굵게 (⌘B)"><b>B</b></button>
+      <button data-cmd="italic" class="fmt" title="기울임 (⌘I)"><i>I</i></button>
+      <button data-cmd="underline" class="fmt" title="밑줄 (⌘U)"><u>U</u></button>
+      <button data-cmd="strikeThrough" class="fmt" title="취소선"><s>S</s></button>
+      <span class="sep"></span>
+      <button data-color="#ff5c5c" class="swatch" style="--c:#ff5c5c" title="빨강"></button>
+      <button data-color="#ff9f43" class="swatch" style="--c:#ff9f43" title="주황"></button>
+      <button data-color="#ffd84d" class="swatch" style="--c:#ffd84d" title="노랑"></button>
+      <button data-color="#4cd88a" class="swatch" style="--c:#4cd88a" title="초록"></button>
+      <button data-color="#5ab0ff" class="swatch" style="--c:#5ab0ff" title="파랑"></button>
+      <button data-color="#b18cff" class="swatch" style="--c:#b18cff" title="보라"></button>
+      <button data-hilite="#5b4a00" class="fmt wide" title="형광펜">형광</button>
+      <span class="sep"></span>
+      <button data-cmd="removeFormat" class="fmt wide" title="서식 지우기">서식 지우기</button>
+      <span class="spacer"></span>
+      <span id="saveState" class="muted small">저장됨</span>
+    </div>
+    <div class="editor-scroll">
+      <div id="editorMarker" class="editor-marker" title="현재 읽는 위치">▶</div>
+      <div id="editor" class="editor" contenteditable="true" spellcheck="false"></div>
+    </div>
+  </div>
+
+  <!-- 리모컨 바 (맥북에서 아이패드 제어) -->
+  <footer class="remote">
+    <button class="btn round play-btn" title="재생/정지 (Space)"><span class="ico-play">▶</span></button>
+    <button class="btn icon reset-btn" title="처음으로 (R)">⟲</button>
+    <div class="remote-progress">
+      <div class="time-row"><span class="elapsed">00:00</span><span class="muted remain">남은 시간 --:--</span></div>
+      <div class="progress seekable"><div class="progress-fill"></div></div>
+    </div>
+    <div class="ctl">
+      <label>속도</label>
+      <button class="btn mini speed-down">−</button>
+      <input type="range" class="speed-range" min="60" max="900" step="5">
+      <button class="btn mini speed-up">＋</button>
+      <span class="pill speed-val">300</span>
+    </div>
+    <div class="ctl">
+      <label>글자</label>
+      <input type="range" class="font-range" min="20" max="160" step="1">
+      <span class="pill font-val">56</span>
+    </div>
+  </footer>
+</section>
+
+<!-- ================= 프롬프터 화면 ================= -->
+<section id="prompterView" class="view hidden">
+  <div id="stage" class="stage">
+    <div id="mirrorBox" class="mirror-box">
+      <div id="content" class="content"></div>
+      <div id="dimTop" class="dim dim-top"></div>
+      <div id="dimBottom" class="dim dim-bottom"></div>
+      <div id="guide" class="guide"></div>
+    </div>
+  </div>
+
+  <div id="countdown" class="countdown hidden"></div>
+  <div id="endBadge" class="end-badge hidden">끝 · 탭하여 처음부터</div>
+
+  <div class="p-top auto-hide">
+    <button id="exitPrompter" class="btn ghost small">⇠ 편집</button>
+    <div class="timer-pill">
+      <span class="elapsed">00:00</span>
+      <span class="muted remain small">--:--</span>
+      <div class="progress thin"><div class="progress-fill"></div></div>
+    </div>
+    <div class="conn small-conn"><span class="dot"></span><span class="conn-text"></span></div>
+  </div>
+
+  <aside id="outline" class="outline auto-hide">
+    <button id="outlineToggle" class="btn icon" title="목차 접기/펼치기">›</button>
+    <div id="outlineList" class="outline-list"></div>
+  </aside>
+
+  <footer class="p-bar auto-hide">
+    <button class="btn round play-btn" title="재생/정지 (Space)"><span class="ico-play">▶</span></button>
+    <button class="btn icon reset-btn" title="처음으로 (R)">⟲</button>
+    <button class="btn icon back-btn" title="이전 줄 (PageUp)">⤒</button>
+    <span class="vsep"></span>
+    <div class="ctl">
+      <label>스크롤 속도</label>
+      <button class="btn mini speed-down">−</button>
+      <input type="range" class="speed-range" min="60" max="900" step="5">
+      <button class="btn mini speed-up">＋</button>
+      <span class="pill speed-val accent">300</span>
+    </div>
+    <span class="vsep"></span>
+    <div class="ctl">
+      <label>글꼴 크기</label>
+      <button class="btn mini font-down">−</button>
+      <input type="range" class="font-range" min="20" max="160" step="1">
+      <button class="btn mini font-up">＋</button>
+      <span class="pill font-val">56</span>
+    </div>
+    <span class="vsep"></span>
+    <button class="btn icon mirror-btn" title="좌우 반전 (M)">⇋</button>
+    <button class="btn icon fs-btn" title="전체 화면 (F)">⛶</button>
+    <button class="btn icon settings-open" title="상세 설정">⚙︎</button>
+  </footer>
+</section>
+
+<!-- ================= 상세 설정 패널 ================= -->
+<div id="settingsBackdrop" class="backdrop hidden"></div>
+<aside id="settingsPanel" class="settings hidden">
+  <div class="settings-head">
+    <h3>상세 설정</h3>
+    <button id="settingsClose" class="btn icon">✕</button>
+  </div>
+  <p class="muted small">「이 기기만」 표시가 없는 설정은 연결된 모든 기기에 바로 적용됩니다.</p>
+
+  <h4>스크롤</h4>
+  <div class="row"><label>속도 <span class="muted small">(분당 글자 수)</span></label><span class="val" data-val="cpm"></span></div>
+  <div class="row-ctl">
+    <button class="btn mini" data-step="cpm:-1">−1</button>
+    <input type="range" data-set="cpm" min="60" max="900" step="1">
+    <button class="btn mini" data-step="cpm:1">＋1</button>
+  </div>
+  <div class="presets">
+    <button class="btn chip" data-preset="cpm:200">느리게 200</button>
+    <button class="btn chip" data-preset="cpm:300">보통 300</button>
+    <button class="btn chip" data-preset="cpm:400">빠르게 400</button>
+    <button class="btn chip" data-preset="cpm:550">아주 빠르게 550</button>
+  </div>
+  <div class="row"><label>빈 줄 쉼 길이</label><span class="val" data-val="blankWeight"></span></div>
+  <input type="range" data-set="blankWeight" min="0" max="40" step="1">
+  <div class="row"><label>시작 카운트다운</label><span class="val" data-val="countdown"></span></div>
+  <input type="range" data-set="countdown" min="0" max="10" step="1">
+
+  <h4>글자</h4>
+  <div class="row"><label>글자 크기</label><span class="val" data-val="fontSize"></span></div>
+  <div class="row-ctl">
+    <button class="btn mini" data-step="fontSize:-1">−1</button>
+    <input type="range" data-set="fontSize" min="20" max="160" step="1">
+    <button class="btn mini" data-step="fontSize:1">＋1</button>
+  </div>
+  <div class="row"><label>이 기기 배율 <span class="local-tag">이 기기만</span></label><span class="val" id="scaleVal"></span></div>
+  <input type="range" id="deviceScale" min="50" max="200" step="5">
+  <div class="row"><label>줄 간격</label><span class="val" data-val="lineHeight"></span></div>
+  <input type="range" data-set="lineHeight" min="1" max="2.6" step="0.05">
+  <div class="row"><label>자간</label><span class="val" data-val="letterSpacing"></span></div>
+  <input type="range" data-set="letterSpacing" min="-0.05" max="0.2" step="0.01">
+  <div class="row"><label>굵기</label></div>
+  <div class="seg" data-seg="fontWeight">
+    <button data-v="400">보통</button><button data-v="500">중간</button><button data-v="600">약간 굵게</button><button data-v="700">굵게</button><button data-v="800">아주 굵게</button>
+  </div>
+  <div class="row"><label>정렬</label></div>
+  <div class="seg" data-seg="align">
+    <button data-v="left">왼쪽</button><button data-v="center">가운데</button>
+  </div>
+  <div class="row"><label>좌우 여백</label><span class="val" data-val="margin"></span></div>
+  <input type="range" data-set="margin" min="0" max="35" step="1">
+
+  <h4>화면</h4>
+  <div class="row"><label>테마</label></div>
+  <div class="seg" data-seg="theme">
+    <button data-v="dark">다크</button><button data-v="light">라이트</button><button data-v="yellow">노랑 글씨</button><button data-v="green">초록 글씨</button>
+  </div>
+  <div class="row"><label>읽기 가이드 라인</label>
+    <label class="switch"><input type="checkbox" data-check="guideVisible"><span></span></label></div>
+  <div class="row"><label>가이드 위치 <span class="muted small">(위에서)</span></label><span class="val" data-val="guidePos"></span></div>
+  <input type="range" data-set="guidePos" min="10" max="70" step="1">
+  <div class="row"><label>가이드 밖 흐리게</label><span class="val" data-val="dim"></span></div>
+  <input type="range" data-set="dim" min="0" max="0.9" step="0.05">
+  <div class="row"><label>좌우 반전 <span class="muted small">(반사판용)</span></label>
+    <label class="switch"><input type="checkbox" data-check="mirrorX"><span></span></label></div>
+  <div class="row"><label>상하 반전</label>
+    <label class="switch"><input type="checkbox" data-check="mirrorY"><span></span></label></div>
+  <div class="row"><label>재생 중 도구 모음 자동 숨김 <span class="local-tag">이 기기만</span></label>
+    <label class="switch"><input type="checkbox" id="autoHide"><span></span></label></div>
+  <div class="row"><label>화면 탭으로 재생/정지 <span class="local-tag">이 기기만</span></label>
+    <label class="switch"><input type="checkbox" id="tapToggle"><span></span></label></div>
+
+  <h4>단축키</h4>
+  <div class="keys muted small">
+    <div><kbd>Space</kbd> 재생/정지</div>
+    <div><kbd>↑</kbd><kbd>↓</kbd> 속도 ±10 (<kbd>Shift</kbd> ±1)</div>
+    <div><kbd>+</kbd><kbd>−</kbd> 글자 크기</div>
+    <div><kbd>←</kbd><kbd>→</kbd> / <kbd>PgUp</kbd><kbd>PgDn</kbd> 이전/다음 줄</div>
+    <div><kbd>R</kbd> 처음으로 · <kbd>M</kbd> 반전 · <kbd>F</kbd> 전체화면 · <kbd>Esc</kbd> 편집</div>
+  </div>
+</aside>
+
+<!-- 연결 안내 -->
+<div id="connModal" class="modal hidden">
+  <div class="modal-card">
+    <h3>기기 연결</h3>
+    <p class="muted small">같은 코드를 쓰는 기기끼리 실시간으로 연결돼요. 와이파이가 달라도 인터넷만 되면 됩니다.</p>
+    <div class="pair">
+      <div id="qrBox" class="qr"></div>
+      <div class="pair-info">
+        <div class="muted small">이 기기의 연결 코드</div>
+        <div id="myCode" class="code">------</div>
+        <div class="muted small">아이패드 카메라로 QR을 찍거나, 아이패드에서 아래에 이 코드를 입력하세요.</div>
+        <div class="link-row"><span id="pairLink" class="pair-link"></span><button id="copyLink" class="btn small" type="button">링크 복사</button></div>
+      </div>
+    </div>
+    <form id="joinForm" class="join">
+      <label for="codeInput" class="muted small">다른 기기의 코드로 연결</label>
+      <div class="join-row">
+        <input id="codeInput" class="code-input" placeholder="예: K7Q-2MX" maxlength="7" autocomplete="off" autocapitalize="characters" spellcheck="false">
+        <button class="btn primary" type="submit">연결</button>
+      </div>
+      <div id="codeError" class="error small"></div>
+    </form>
+    <p id="offlineNote" class="warn small hidden">인터넷에 연결되어 있지 않아 지금은 이 기기에만 저장돼요. 인터넷이 연결되면 새로고침해 주세요.</p>
+    <div class="muted small">지금 연결된 기기</div>
+    <div id="peerList" class="peer-list"></div>
+    <div class="modal-actions">
+      <button id="regenCode" class="btn ghost small" type="button">새 코드 만들기</button>
+      <button id="connClose" class="btn primary" type="button">확인</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+// 싱크 프롬프터 — 맥북/아이패드 실시간 연동
+// 위치는 '가중 글자 수' 단위로 동기화하므로 기기마다 화면 크기·글자 크기가 달라도 같은 문장을 가리킵니다.
+(() => {
+'use strict';
+
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+// ---------- 기기 정보 ----------
+const TAB = Math.random().toString(36).slice(2, 10);
+const ua = navigator.userAgent;
+const isIPad = /iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+const deviceName = isIPad ? 'iPad' : /iPhone/.test(ua) ? 'iPhone' : /Macintosh/.test(ua) ? 'Mac' : /Android/.test(ua) ? 'Android' : 'PC';
+
+const local = {
+  get(k, d) { try { const v = localStorage.getItem('ps.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('ps.' + k, JSON.stringify(v)); } catch {} },
+};
+const prefs = {
+  scale: local.get('scale', 100),
+  autoHide: local.get('autoHide', true),
+  tapToggle: local.get('tapToggle', true),
+};
+
+// ---------- 상태 ----------
+const DEFAULT_SETTINGS = {
+  cpm: 300, fontSize: 56, lineHeight: 1.6, letterSpacing: 0, fontWeight: 500, margin: 8, align: 'center',
+  guidePos: 30, guideVisible: true, dim: 0.45, mirrorX: false, mirrorY: false, countdown: 3, theme: 'dark', blankWeight: 8,
+};
+const S = {
+  settings: { ...DEFAULT_SETTINGS },
+  scripts: [],
+  currentId: null,
+  pb: { playing: false, anchorPos: 0, anchorTime: 0, elapsedBase: 0, cpm: 300 },
+  peers: [],
+  ready: false,
+};
+const current = () => S.scripts.find(s => s.id === S.currentId);
+
+// 애플 기기끼리는 시계가 자동으로 맞춰져 있어 각 기기의 현재 시각을 그대로 기준으로 씀
+// 연결된 기기들 중 '허브' 기기의 시계를 기준으로 맞춤 (연결 전에는 내 시계)
+let clockOffset = 0;
+const serverNow = () => Date.now() + clockOffset;
+
+// ---------- 이 기기에 저장 ----------
+const LS_KEY = 'ps.state.v1';
+const meta = { settingsTs: 0, metaTs: 0, pbTs: 0, tomb: {} }; // 마지막 변경 시각 (최신 값이 이김), tomb = 삭제된 대본
+let persistTimer = null;
+function persist() {
+  clearTimeout(persistTimer);
+  persistTimer = setTimeout(() => {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(snapshot())); } catch {}
+  }, 300);
+}
+function snapshot() {
+  return { settings: S.settings, scripts: S.scripts, currentId: S.currentId, pb: S.pb, ...meta };
+}
+
+// ---------- 기기 간 직접 연결 (P2P) ----------
+// 같은 연결 코드를 가진 기기 중 먼저 들어온 기기가 '허브'가 되고, 나머지는 허브에 붙어서 변경을 주고받음.
+// 연결을 맺을 때만 PeerJS 공개 중계 서버를 쓰고, 이후 데이터는 기기끼리 직접 오감.
+const HUB_PREFIX = 'syncprompter-v1-';
+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const sync = { peer: null, role: null, conns: new Set(), code: null, retryTimer: null, bestRtt: Infinity };
+const RELAY = new Set(['settings', 'pb', 'meta', 'script', 'delete']);
+
+function newCode() {
+  const a = new Uint32Array(6); crypto.getRandomValues(a);
+  return [...a].map(n => CODE_ALPHABET[n % CODE_ALPHABET.length]).join('');
+}
+const fmtCode = c => c ? `${c.slice(0, 3)}-${c.slice(3)}` : '------';
+const cleanCode = v => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+function broadcast(msg, except) {
+  for (const c of sync.conns) if (c !== except && c.open) { try { c.send(msg); } catch {} }
+}
+const savePlayback = () => { meta.pbTs = serverNow(); persist(); broadcast({ type: 'pb', data: S.pb, ts: meta.pbTs }); };
+const saveSettings = () => { meta.settingsTs = serverNow(); persist(); broadcast({ type: 'settings', data: S.settings, ts: meta.settingsTs }); };
+const saveMeta = () => { meta.metaTs = serverNow(); persist(); broadcast({ type: 'meta', currentId: S.currentId, ts: meta.metaTs }); };
+function saveScript(s) {
+  if (!s) return;
+  s.updatedAt = serverNow();
+  persist();
+  broadcast({ type: 'script', script: { ...s } });
+}
+function removeScript(id) {
+  meta.tomb[id] = serverNow();
+  persist();
+  broadcast({ type: 'delete', id, ts: meta.tomb[id] });
+}
+
+function startSync(code) {
+  clearTimeout(sync.retryTimer);
+  if (sync.peer) { try { sync.peer.destroy(); } catch {} }
+  sync.peer = null; sync.conns.clear(); sync.role = null; sync.code = code; sync.bestRtt = Infinity;
+  S.peers = [];
+  setConn();
+  if (typeof Peer === 'undefined') return; // 인터넷이 없으면 이 기기에서만 동작
+  const p = new Peer(HUB_PREFIX + code, { debug: 0 });
+  sync.peer = p;
+  p.on('open', () => { if (sync.peer !== p) return; sync.role = 'hub'; clockOffset = 0; sendPeers(); });
+  p.on('connection', c => { if (sync.peer === p) setupConn(c, p); });
+  p.on('disconnected', () => { if (sync.peer === p && !p.destroyed) { try { p.reconnect(); } catch {} } });
+  p.on('error', err => {
+    if (sync.peer !== p) return;
+    if (err.type === 'unavailable-id') joinAsClient(code);
+    else scheduleRetry();
+  });
+}
+function joinAsClient(code) {
+  try { sync.peer.destroy(); } catch {}
+  const p = new Peer({ debug: 0 });
+  sync.peer = p;
+  p.on('open', () => {
+    if (sync.peer !== p) return;
+    sync.role = 'client';
+    const c = p.connect(HUB_PREFIX + code, { reliable: true });
+    setupConn(c, p);
+    setTimeout(() => { if (sync.peer === p && !c.open) scheduleRetry(); }, 10000);
+  });
+  p.on('disconnected', () => { if (sync.peer === p && !p.destroyed) { try { p.reconnect(); } catch {} } });
+  p.on('error', () => { if (sync.peer === p) scheduleRetry(); }); // 허브가 사라졌으면 내가 허브가 되도록 다시 시도
+}
+function scheduleRetry() {
+  clearTimeout(sync.retryTimer);
+  sync.role = null; S.peers = [];
+  setConn();
+  sync.retryTimer = setTimeout(() => startSync(sync.code), 1500 + Math.random() * 2500);
+}
+function setupConn(c, p) {
+  c.on('open', () => {
+    if (sync.peer !== p) { try { c.close(); } catch {} return; }
+    sync.conns.add(c);
+    c.send({ type: 'hello', state: snapshot(), device: deviceName });
+    if (sync.role === 'client') for (let i = 0; i < 5; i++) setTimeout(() => { if (c.open) c.send({ type: 'ping', t0: Date.now() }); }, i * 400);
+    setConn();
+  });
+  c.on('data', m => { try { onMsg(m, c); } catch (e) { console.warn(e); } });
+  const gone = () => {
+    if (!sync.conns.delete(c)) return;
+    if (sync.role === 'hub') sendPeers(); else scheduleRetry();
+  };
+  c.on('close', gone);
+  c.on('error', gone);
+}
+function sendPeers() {
+  if (sync.role !== 'hub') return;
+  const list = [{ id: sync.peer.id, name: deviceName }, ...[...sync.conns].map(c => ({ id: c.peer, name: c.deviceName || '기기' }))];
+  S.peers = list.map(x => ({ name: x.name, me: x.id === sync.peer.id }));
+  broadcast({ type: 'peers', list });
+  setConn();
+}
+
+function onMsg(m, conn) {
+  if (!m || typeof m !== 'object') return;
+  if (sync.role === 'hub' && RELAY.has(m.type)) broadcast(m, conn);
+  switch (m.type) {
+    case 'hello':
+      conn.deviceName = SAFE_DEVICE.test(m.device) ? m.device : '기기';
+      mergeState(m.state);
+      if (sync.role === 'hub') { sendPeers(); broadcast({ type: 'hello', state: snapshot(), device: deviceName }, conn); }
+      break;
+    case 'peers':
+      if (sync.role === 'client' && Array.isArray(m.list)) {
+        S.peers = m.list.slice(0, 16).map(x => ({ name: SAFE_DEVICE.test(x && x.name) ? x.name : '기기', me: x && x.id === sync.peer.id }));
+        setConn();
+      }
+      break;
+    case 'ping': conn.send({ type: 'pong', t0: m.t0, th: Date.now() }); break;
+    case 'pong': {
+      const t1 = Date.now(), rtt = t1 - m.t0;
+      if (rtt >= 0 && rtt < sync.bestRtt) { sync.bestRtt = rtt; clockOffset = +m.th - (m.t0 + t1) / 2; }
+      break;
+    }
+    case 'settings': if (+m.ts > meta.settingsTs) { meta.settingsTs = +m.ts; onSettingsDoc(m.data); persist(); } break;
+    case 'pb': if (+m.ts > meta.pbTs) { meta.pbTs = +m.ts; onPlaybackDoc(m.data); persist(); } break;
+    case 'meta': if (+m.ts > meta.metaTs) { meta.metaTs = +m.ts; onMetaDoc(m.currentId); persist(); } break;
+    case 'script': mergeScripts([m.script]); break;
+    case 'delete':
+      if (typeof m.id === 'string' && +m.ts > (meta.tomb[m.id] || 0)) { meta.tomb[m.id] = +m.ts; mergeScripts([]); }
+      break;
+  }
+}
+
+// ---------- 블록 / 가중치 ----------
+const BLOCK_TAGS = new Set(['DIV', 'P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'UL', 'OL', 'LI', 'BLOCKQUOTE', 'PRE', 'TABLE', 'HR', 'SECTION']);
+// 최상위 노드를 '줄 블록' 단위로 묶음 (편집기와 프롬프터가 같은 규칙을 씀)
+function groupNodes(container) {
+  const groups = [];
+  let cur = null;
+  for (const n of container.childNodes) {
+    if (n.nodeType === 1 && BLOCK_TAGS.has(n.tagName)) { cur = null; groups.push([n]); continue; }
+    if (n.nodeType === 1 && n.tagName === 'BR') { if (cur) cur = null; else groups.push([n]); continue; }
+    if (n.nodeType === 3 && !n.textContent.trim() && !cur) continue;
+    if (n.nodeType !== 1 && n.nodeType !== 3) continue;
+    if (!cur) { cur = []; groups.push(cur); }
+    cur.push(n);
+  }
+  return groups;
+}
+const groupText = g => g.map(n => n.textContent).join('');
+const isHeadingGroup = g => g.length === 1 && /^H[1-3]$/.test(g[0].tagName || '');
+
+function weightsOf(groups) {
+  const blank = S.settings ? S.settings.blankWeight : 8;
+  const w = groups.map(g => groupText(g).replace(/\s/g, '').length || blank);
+  const cum = [0];
+  for (const x of w) cum.push(cum[cum.length - 1] + x);
+  return { w, cum, total: cum[cum.length - 1] };
+}
+function indexAt(cum, pos) { // cum[i] <= pos < cum[i+1]
+  let lo = 0, hi = cum.length - 2;
+  if (hi < 0) return 0;
+  while (lo < hi) { const m = (lo + hi + 1) >> 1; if (cum[m] <= pos) lo = m; else hi = m - 1; }
+  return lo;
+}
+
+// 다른 기기에서 온 HTML은 실행되지 않는 문서에서 읽고, 스크립트성 요소/속성은 제거
+const DROP_TAGS = 'script,style,iframe,object,embed,link,meta,base,form,input,button,textarea,select,img,video,audio,svg,math';
+function normalizeHtml(html) {
+  const doc = new DOMParser().parseFromString(`<body>${html || ''}</body>`, 'text/html');
+  const tmp = doc.body;
+  tmp.querySelectorAll(DROP_TAGS).forEach(el => el.remove());
+  tmp.querySelectorAll('*').forEach(el => {
+    for (const a of [...el.attributes]) {
+      const n = a.name.toLowerCase();
+      if (n.startsWith('on') || ((n === 'href' || n === 'src') && /^\s*javascript:/i.test(a.value)) || n === 'srcdoc') el.removeAttribute(a.name);
+    }
+  });
+  const out = document.createElement('div');
+  for (const g of groupNodes(tmp)) {
+    if (g.length === 1 && g[0].nodeType === 1 && BLOCK_TAGS.has(g[0].tagName)) { out.appendChild(g[0]); continue; }
+    const d = document.createElement('div');
+    if (g.length === 1 && g[0].tagName === 'BR') d.innerHTML = '<br>';
+    else g.forEach(n => d.appendChild(n));
+    out.appendChild(d);
+  }
+  return out.innerHTML;
+}
+
+// ---------- 프롬프터 레이아웃 ----------
+const content = $('#content');
+const stage = $('#stage');
+const L = { groups: [], w: [], cum: [0], total: 0, tops: [], lineH: 56, H: 0, headings: [] };
+
+function renderPrompter() {
+  const s = current();
+  content.innerHTML = normalizeHtml(s ? s.html : '');
+  if (!content.textContent.trim()) content.innerHTML = '<div class="empty-note">대본이 비어 있어요.<br>편집 화면에서 대본을 입력하거나 붙여 넣으세요.</div>';
+  L.groups = [...content.children].map(el => [el]);
+  Object.assign(L, weightsOf(L.groups));
+  L.headings = [];
+  L.groups.forEach((g, i) => { if (isHeadingGroup(g)) L.headings.push({ title: g[0].textContent.trim() || '개요', pos: L.cum[i] }); });
+  buildOutline();
+  measure();
+}
+
+function measure() {
+  if ($('#prompterView').classList.contains('hidden')) { L.tops = []; return; }
+  const els = [...content.children];
+  L.tops = els.map(el => el.offsetTop);
+  const last = els[els.length - 1];
+  L.tops.push(last ? last.offsetTop + last.offsetHeight : 0);
+  L.lineH = parseFloat(getComputedStyle(content).lineHeight) || 56;
+  L.H = stage.clientHeight;
+}
+function posToOffset(pos) {
+  if (L.tops.length < 2) return 0;
+  const i = indexAt(L.cum, pos);
+  const f = clamp((pos - L.cum[i]) / (L.w[i] || 1), 0, 1);
+  return L.tops[i] + f * (L.tops[i + 1] - L.tops[i]);
+}
+function offsetToPos(y) {
+  if (L.tops.length < 2) return 0;
+  const n = L.w.length;
+  if (y <= 0) return 0;
+  if (y >= L.tops[n]) return L.total;
+  let i = indexAt(L.tops, y);
+  i = clamp(i, 0, n - 1);
+  const span = (L.tops[i + 1] - L.tops[i]) || 1;
+  return L.cum[i] + clamp((y - L.tops[i]) / span, 0, 1) * L.w[i];
+}
+
+// ---------- 재생 ----------
+function currentPos() {
+  const pb = S.pb;
+  if (!pb.playing) return clamp(pb.anchorPos, 0, L.total);
+  const t = serverNow();
+  if (t < pb.anchorTime) return clamp(pb.anchorPos, 0, L.total);
+  return clamp(pb.anchorPos + (t - pb.anchorTime) / 60000 * (pb.cpm || S.settings.cpm), 0, L.total);
+}
+function elapsed() {
+  const pb = S.pb;
+  if (!pb.playing) return pb.elapsedBase;
+  return pb.elapsedBase + Math.max(0, serverNow() - pb.anchorTime);
+}
+function countdownLeft() { return S.pb.playing ? Math.max(0, S.pb.anchorTime - serverNow()) : 0; }
+
+function applyPb({ playing, anchorPos, delay = 0, elapsedBase }) {
+  const cpm = S.settings.cpm;
+  S.pb = { playing, anchorPos, anchorTime: serverNow() + delay, elapsedBase, cpm };
+  savePlayback();
+  showUI();
+}
+function setPlaying(play) {
+  if (play === S.pb.playing) return;
+  let pos = currentPos(), el = elapsed();
+  if (play) {
+    if (pos >= L.total - 0.01) { pos = 0; el = 0; display = 0; }
+    applyPb({ playing: true, anchorPos: pos, delay: (S.settings.countdown || 0) * 1000, elapsedBase: el });
+    requestWakeLock();
+  } else {
+    applyPb({ playing: false, anchorPos: pos, elapsedBase: el });
+  }
+}
+const togglePlay = () => setPlaying(!S.pb.playing);
+function seek(pos, queued) {
+  applyPb({ playing: S.pb.playing, anchorPos: clamp(pos, 0, L.total), delay: countdownLeft(), elapsedBase: elapsed() }, queued);
+}
+function resetToStart() { display = 0; applyPb({ playing: false, anchorPos: 0, elapsedBase: 0 }); }
+function jumpBlock(dir) {
+  const pos = currentPos();
+  let i = indexAt(L.cum, pos);
+  const blank = j => !groupText(L.groups[j] || []).trim();
+  if (dir > 0) { i++; while (i < L.w.length && blank(i)) i++; seek(i >= L.w.length ? L.total : L.cum[i]); }
+  else {
+    if (pos - L.cum[i] < 1.5) { i--; while (i > 0 && blank(i)) i--; }
+    seek(L.cum[Math.max(0, i)]);
+  }
+}
+
+// ---------- 설정 ----------
+const THEMES = {
+  dark: { bg: '#0b0b0c', text: '#ffffff' },
+  light: { bg: '#fafafa', text: '#111111' },
+  yellow: { bg: '#000000', text: '#ffe14d' },
+  green: { bg: '#000000', text: '#7dffa1' },
+};
+const FMT = {
+  cpm: v => `${v} 자/분`, fontSize: v => `${v}px`, lineHeight: v => (+v).toFixed(2), letterSpacing: v => `${(+v).toFixed(2)}em`,
+  margin: v => `${v}%`, guidePos: v => `${v}%`, dim: v => `${Math.round(v * 100)}%`, countdown: v => (v ? `${v}초` : '끔'),
+  blankWeight: v => `${v}자`,
+};
+const LIMITS = { cpm: [60, 900], fontSize: [20, 160] };
+
+function applySettings() {
+  const st = S.settings, r = document.documentElement.style;
+  const th = THEMES[st.theme] || THEMES.dark;
+  r.setProperty('--p-bg', th.bg);
+  r.setProperty('--p-text', th.text);
+  r.setProperty('--p-size', `${st.fontSize * prefs.scale / 100}px`);
+  r.setProperty('--p-lh', st.lineHeight);
+  r.setProperty('--p-ls', `${st.letterSpacing}em`);
+  r.setProperty('--p-weight', st.fontWeight);
+  r.setProperty('--p-margin', `${st.margin}%`);
+  r.setProperty('--p-align', st.align);
+  $('#mirrorBox').style.transform = `scale(${st.mirrorX ? -1 : 1}, ${st.mirrorY ? -1 : 1})`;
+  $('#guide').style.display = st.guideVisible ? '' : 'none';
+  $$('.dim').forEach(d => d.style.opacity = st.dim);
+
+  // 컨트롤 값 반영
+  $$('.speed-range').forEach(e => e.value = st.cpm);
+  $$('.speed-val').forEach(e => e.textContent = st.cpm);
+  $$('.font-range').forEach(e => e.value = st.fontSize);
+  $$('.font-val').forEach(e => e.textContent = st.fontSize);
+  $$('.mirror-btn').forEach(e => e.classList.toggle('on', !!st.mirrorX));
+  $$('[data-set]').forEach(e => { if (document.activeElement !== e) e.value = st[e.dataset.set]; });
+  $$('[data-val]').forEach(e => e.textContent = (FMT[e.dataset.val] || String)(st[e.dataset.val]));
+  $$('[data-seg]').forEach(seg => seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', String(st[seg.dataset.seg]) === b.dataset.v)));
+  $$('[data-check]').forEach(e => e.checked = !!st[e.dataset.check]);
+  $('#deviceScale').value = prefs.scale;
+  $('#scaleVal').textContent = `${prefs.scale}%`;
+  $('#autoHide').checked = prefs.autoHide;
+  $('#tapToggle').checked = prefs.tapToggle;
+  measure();
+}
+
+function setSetting(key, v) {
+  if (LIMITS[key]) v = clamp(v, ...LIMITS[key]);
+  if (key === 'cpm') {
+    // 재생 중 속도 변경: 현재 위치에서 새 속도로 다시 기준점 설정
+    const pos = currentPos(), el = elapsed(), cd = countdownLeft();
+    S.settings.cpm = v;
+    if (S.pb.playing) applyPb({ playing: true, anchorPos: pos, delay: cd, elapsedBase: el }, true);
+  } else S.settings[key] = v;
+  if (key === 'blankWeight') { const pos = currentPos(); renderPrompter(); seek(Math.min(pos, L.total), true); }
+  applySettings();
+  saveSettings();
+}
+
+// ---------- 화면 전환 ----------
+function showView(name) {
+  const p = name === 'prompter';
+  $('#prompterView').classList.toggle('hidden', !p);
+  $('#editorView').classList.toggle('hidden', p);
+  local.set('view', name);
+  if (p) { flushEditor(); measure(); display = currentPos(); requestWakeLock(); showUI(); }
+  else document.body.classList.remove('ui-hidden');
+}
+
+// ---------- 도구 모음 자동 숨김 ----------
+let hideTimer = null;
+function showUI() {
+  document.body.classList.remove('ui-hidden');
+  clearTimeout(hideTimer);
+  hideTimer = setTimeout(() => {
+    if (S.pb.playing && prefs.autoHide && !$('#prompterView').classList.contains('hidden') && $('#settingsPanel').classList.contains('hidden'))
+      document.body.classList.add('ui-hidden');
+  }, 2500);
+}
+
+// ---------- 렌더 루프 ----------
+let display = 0;          // 화면에 보이는 위치 (부드럽게 따라감)
+let dragging = false, dragPos = 0;
+let lastUi = 0, lastActiveHeading = -2, wasPlaying = false;
+const fmtTime = ms => { const s = Math.max(0, Math.round(ms / 1000)); return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (!S.ready) return;
+  const target = currentPos();
+
+  // 끝에 도달하면 정지 (모든 기기가 같은 시각에 같은 판단)
+  if (S.pb.playing && target >= L.total && serverNow() >= S.pb.anchorTime) {
+    const el = S.pb.elapsedBase + (L.total - S.pb.anchorPos) / (S.pb.cpm || S.settings.cpm) * 60000;
+    S.pb = { ...S.pb, playing: false, anchorPos: L.total, elapsedBase: el };
+    showUI();
+  }
+
+  if (dragging) display = dragPos;
+  else {
+    const d = target - display;
+    display = Math.abs(d) < 0.05 ? target : display + d * 0.2;
+  }
+
+  const prompterOn = !$('#prompterView').classList.contains('hidden');
+  if (prompterOn) {
+    if (!L.H) measure();
+    const guideY = L.H * S.settings.guidePos / 100;
+    const ty = guideY - posToOffset(display) - L.lineH / 2;
+    content.style.transform = `translate3d(0, ${ty.toFixed(2)}px, 0)`;
+    $('#guide').style.top = `${guideY - 1}px`;
+    const band = L.lineH * 0.8;
+    $('#dimTop').style.height = `${Math.max(0, guideY - band)}px`;
+    $('#dimBottom').style.height = `${Math.max(0, L.H - guideY - band)}px`;
+  }
+
+  if (now - lastUi > 100) { lastUi = now; updateUi(prompterOn); }
+}
+
+function updateUi(prompterOn) {
+  const pb = S.pb;
+  const pos = display;
+  const cpm = pb.playing ? (pb.cpm || S.settings.cpm) : S.settings.cpm;
+  $$('.elapsed').forEach(e => e.textContent = fmtTime(elapsed()));
+  const remain = fmtTime((L.total - pos) / cpm * 60000);
+  $$('.remain').forEach(e => e.textContent = e.closest('.timer-pill') ? `−${remain}` : `남은 시간 ${remain}`);
+  const pct = L.total ? (pos / L.total * 100) : 0;
+  $$('.progress-fill').forEach(e => e.style.width = `${pct}%`);
+  if (pb.playing !== wasPlaying) {
+    wasPlaying = pb.playing;
+    $$('.play-btn').forEach(b => { b.classList.toggle('playing', pb.playing); b.querySelector('.ico-play').textContent = pb.playing ? '❚❚' : '▶'; });
+    if (!pb.playing) showUI();
+  }
+  const cd = countdownLeft();
+  $('#countdown').classList.toggle('hidden', !(cd > 0 && prompterOn));
+  if (cd > 0) $('#countdown').textContent = Math.ceil(cd / 1000);
+  $('#endBadge').classList.toggle('hidden', !(prompterOn && !pb.playing && L.total > 0 && pos >= L.total - 0.01));
+
+  // 목차 하이라이트
+  let active = -1;
+  L.headings.forEach((h, i) => { if (h.pos <= pos + 0.01) active = i; });
+  if (active !== lastActiveHeading) {
+    lastActiveHeading = active;
+    $$('.outline-item').forEach((b, i) => b.classList.toggle('active', i === active));
+  }
+  if (!prompterOn) updateEditorMarker(pos);
+}
+
+// ---------- 목차 ----------
+function buildOutline() {
+  const list = $('#outlineList');
+  list.innerHTML = '';
+  L.headings.forEach(h => {
+    const b = document.createElement('button');
+    b.className = 'outline-item';
+    b.textContent = h.title;
+    b.title = h.title;
+    b.onclick = () => seek(h.pos);
+    list.appendChild(b);
+  });
+  $('#outline').classList.toggle('hidden', !L.headings.length);
+  lastActiveHeading = -2;
+}
+$('#outlineToggle').onclick = () => $('#outline').classList.toggle('collapsed');
+
+// ---------- 무대 조작 (드래그/탭/휠) ----------
+let ptr = null;
+stage.addEventListener('pointerdown', e => {
+  ptr = { id: e.pointerId, y: e.clientY, start: display, moved: false };
+  stage.setPointerCapture(e.pointerId);
+  showUI();
+});
+stage.addEventListener('pointermove', e => {
+  if (!ptr || ptr.id !== e.pointerId) return;
+  const dy = e.clientY - ptr.y;
+  if (!ptr.moved && Math.abs(dy) < 8) return;
+  ptr.moved = true; dragging = true;
+  const sign = S.settings.mirrorY ? -1 : 1;
+  dragPos = offsetToPos(posToOffset(ptr.start) - dy * sign);
+  seek(dragPos, true);
+});
+const endPtr = e => {
+  if (!ptr || ptr.id !== e.pointerId) return;
+  if (ptr.moved) { seek(dragPos); display = dragPos; dragging = false; }
+  else if (e.type === 'pointerup' && prefs.tapToggle) {
+    if (!S.pb.playing && L.total && currentPos() >= L.total - 0.01) resetToStart();
+    else togglePlay();
+  }
+  ptr = null;
+};
+stage.addEventListener('pointerup', endPtr);
+stage.addEventListener('pointercancel', endPtr);
+stage.addEventListener('wheel', e => {
+  e.preventDefault();
+  const sign = S.settings.mirrorY ? -1 : 1;
+  const p = offsetToPos(posToOffset(currentPos()) + e.deltaY * sign);
+  display = p;
+  seek(p, true);
+  showUI();
+}, { passive: false });
+document.addEventListener('pointermove', () => { if (!document.body.classList.contains('ui-hidden') || !dragging) showUI(); });
+
+// ---------- 공용 컨트롤 바인딩 ----------
+$$('.play-btn').forEach(b => b.onclick = togglePlay);
+$$('.reset-btn').forEach(b => b.onclick = resetToStart);
+$$('.back-btn').forEach(b => b.onclick = () => jumpBlock(-1));
+$$('.speed-range').forEach(r => r.oninput = () => setSetting('cpm', +r.value));
+$$('.speed-down').forEach(b => b.onclick = () => setSetting('cpm', S.settings.cpm - 5));
+$$('.speed-up').forEach(b => b.onclick = () => setSetting('cpm', S.settings.cpm + 5));
+$$('.font-range').forEach(r => r.oninput = () => setSetting('fontSize', +r.value));
+$$('.font-down').forEach(b => b.onclick = () => setSetting('fontSize', S.settings.fontSize - 2));
+$$('.font-up').forEach(b => b.onclick = () => setSetting('fontSize', S.settings.fontSize + 2));
+$$('.mirror-btn').forEach(b => b.onclick = () => setSetting('mirrorX', !S.settings.mirrorX));
+$$('.fs-btn').forEach(b => b.onclick = toggleFullscreen);
+$$('.seekable').forEach(bar => bar.addEventListener('pointerdown', e => {
+  const r = bar.getBoundingClientRect();
+  seek(clamp((e.clientX - r.left) / r.width, 0, 1) * L.total);
+}));
+$('#openPrompter').onclick = () => showView('prompter');
+$('#exitPrompter').onclick = () => { if (document.fullscreenElement) document.exitFullscreen?.(); showView('editor'); };
+
+function toggleFullscreen() {
+  const d = document, el = d.documentElement;
+  if (d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen).call(d);
+  else (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el);
+}
+
+// ---------- 설정 패널 ----------
+const openSettings = () => { $('#settingsPanel').classList.remove('hidden'); $('#settingsBackdrop').classList.remove('hidden'); document.body.classList.remove('ui-hidden'); };
+const closeSettings = () => { $('#settingsPanel').classList.add('hidden'); $('#settingsBackdrop').classList.add('hidden'); showUI(); };
+$$('.settings-open').forEach(b => b.onclick = openSettings);
+$('#settingsClose').onclick = closeSettings;
+$('#settingsBackdrop').onclick = closeSettings;
+
+$$('[data-set]').forEach(r => r.addEventListener('input', () => setSetting(r.dataset.set, parseFloat(r.value))));
+$$('[data-step]').forEach(b => b.onclick = () => { const [k, d] = b.dataset.step.split(':'); setSetting(k, +(S.settings[k] + +d).toFixed(2)); });
+$$('[data-preset]').forEach(b => b.onclick = () => { const [k, v] = b.dataset.preset.split(':'); setSetting(k, +v); });
+$$('[data-seg]').forEach(seg => seg.querySelectorAll('button').forEach(b => b.onclick = () => {
+  const v = isNaN(+b.dataset.v) ? b.dataset.v : +b.dataset.v;
+  setSetting(seg.dataset.seg, v);
+}));
+$$('[data-check]').forEach(c => c.onchange = () => setSetting(c.dataset.check, c.checked));
+$('#deviceScale').oninput = e => { prefs.scale = +e.target.value; local.set('scale', prefs.scale); applySettings(); };
+$('#autoHide').onchange = e => { prefs.autoHide = e.target.checked; local.set('autoHide', prefs.autoHide); showUI(); };
+$('#tapToggle').onchange = e => { prefs.tapToggle = e.target.checked; local.set('tapToggle', prefs.tapToggle); };
+
+// ---------- 키보드 ----------
+document.addEventListener('keydown', e => {
+  const t = e.target;
+  const typing = t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) && t.type !== 'range' && t.type !== 'checkbox';
+  if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+  const k = e.key;
+  const handled = () => { e.preventDefault(); showUI(); };
+  if (k === ' ') { handled(); togglePlay(); }
+  else if (k === 'ArrowUp') { handled(); setSetting('cpm', S.settings.cpm + (e.shiftKey ? 1 : 10)); }
+  else if (k === 'ArrowDown') { handled(); setSetting('cpm', S.settings.cpm - (e.shiftKey ? 1 : 10)); }
+  else if (k === '+' || k === '=') { handled(); setSetting('fontSize', S.settings.fontSize + 2); }
+  else if (k === '-' || k === '_') { handled(); setSetting('fontSize', S.settings.fontSize - 2); }
+  else if (k === 'ArrowRight' || k === 'PageDown') { handled(); jumpBlock(1); }
+  else if (k === 'ArrowLeft' || k === 'PageUp') { handled(); jumpBlock(-1); }
+  else if (k === 'Home') { handled(); resetToStart(); }
+  else if (k === 'r' || k === 'R' || k === 'ㄱ') { handled(); resetToStart(); }
+  else if (k === 'm' || k === 'M' || k === 'ㅡ') { handled(); setSetting('mirrorX', !S.settings.mirrorX); }
+  else if (k === 'f' || k === 'F' || k === 'ㄹ') { handled(); toggleFullscreen(); }
+  else if (k === 'Escape') {
+    if (!$('#settingsPanel').classList.contains('hidden')) closeSettings();
+    else if (!$('#prompterView').classList.contains('hidden') && !document.fullscreenElement) showView('editor');
+  }
+});
+
+// ---------- 편집기 ----------
+const editor = $('#editor');
+const titleInput = $('#titleInput');
+try { document.execCommand('defaultParagraphSeparator', false, 'div'); } catch {}
+let editorDirty = false, editTimer = null, pendingRemoteHtml = null, savedRange = null;
+
+function setSaveState(t) { $('#saveState').textContent = t; }
+function loadEditor() {
+  const s = current();
+  editor.innerHTML = normalizeHtml(s ? s.html : '');
+  titleInput.value = s ? s.title : '';
+  editorDirty = false; pendingRemoteHtml = null;
+}
+function flushEditor() {
+  if (!editorDirty) return;
+  clearTimeout(editTimer);
+  editorDirty = false;
+  const s = current(); if (!s) return;
+  s.html = editor.innerHTML;
+  saveScript(s);
+  setSaveState('저장됨');
+}
+function onEdit() {
+  let s = current();
+  if (!s) s = createScript(editor.innerHTML, false);
+  editorDirty = true;
+  setSaveState('저장 중…');
+  s.html = editor.innerHTML;
+  renderPrompter();
+  S.pb.anchorPos = Math.min(S.pb.anchorPos, L.total);
+  editorGroupsCache = null;
+  clearTimeout(editTimer);
+  editTimer = setTimeout(flushEditor, 400);
+}
+editor.addEventListener('input', onEdit);
+editor.addEventListener('blur', () => {
+  flushEditor();
+  if (pendingRemoteHtml != null) { editor.innerHTML = pendingRemoteHtml; pendingRemoteHtml = null; editorGroupsCache = null; }
+});
+// 붙여넣기: 다른 앱의 이상한 서식 대신 줄 단위 텍스트로
+editor.addEventListener('paste', e => {
+  const text = e.clipboardData && e.clipboardData.getData('text/plain');
+  if (text == null) return;
+  e.preventDefault();
+  const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const lines = text.replace(/\r\n?/g, '\n').split('\n');
+  if (lines.length === 1) document.execCommand('insertText', false, text);
+  else document.execCommand('insertHTML', false, lines.map(l => l.trim() ? `<div>${esc(l)}</div>` : '<div><br></div>').join(''));
+});
+titleInput.addEventListener('input', () => {
+  const s = current() || createScript(editor.innerHTML, false);
+  s.title = titleInput.value;
+  saveScript(s);
+  fillScriptSelect();
+});
+
+// 선택 영역 저장 (아이패드에서 버튼 누를 때 선택이 풀리는 문제 방지)
+document.addEventListener('selectionchange', () => {
+  const sel = getSelection();
+  if (sel.rangeCount && editor.contains(sel.anchorNode)) savedRange = sel.getRangeAt(0).cloneRange();
+});
+function restoreSelection() {
+  editor.focus();
+  if (savedRange) { const sel = getSelection(); sel.removeAllRanges(); sel.addRange(savedRange); }
+}
+function blockOfSelection() {
+  let n = getSelection().anchorNode;
+  while (n && n.parentNode !== editor) n = n.parentNode;
+  return n;
+}
+$$('.format-bar button').forEach(b => {
+  b.addEventListener('mousedown', e => e.preventDefault());
+  b.addEventListener('click', () => {
+    restoreSelection();
+    const cmd = b.dataset.cmd;
+    if (cmd === 'heading') {
+      const blk = blockOfSelection();
+      const isH = blk && blk.nodeType === 1 && /^H[1-3]$/.test(blk.tagName);
+      document.execCommand('formatBlock', false, isH ? '<div>' : '<h2>');
+    } else if (cmd === 'body') document.execCommand('formatBlock', false, '<div>');
+    else if (cmd) document.execCommand(cmd, false, null);
+    else if (b.dataset.color) { document.execCommand('styleWithCSS', false, true); document.execCommand('foreColor', false, b.dataset.color); }
+    else if (b.dataset.hilite) { document.execCommand('styleWithCSS', false, true); document.execCommand('hiliteColor', false, b.dataset.hilite); }
+    onEdit();
+  });
+});
+
+// 편집기 안의 '현재 읽는 위치' 표시 + 자동 따라가기
+let editorGroupsCache = null;
+const editorScroll = $('.editor-scroll');
+function updateEditorMarker(pos) {
+  if (!editorGroupsCache) { const g = groupNodes(editor); editorGroupsCache = { g, ...weightsOf(g) }; }
+  const { g, w, cum } = editorGroupsCache;
+  const marker = $('#editorMarker');
+  if (!g.length) { marker.style.display = 'none'; return; }
+  marker.style.display = '';
+  const i = indexAt(cum, pos);
+  const grp = g[Math.min(i, g.length - 1)];
+  const range = document.createRange();
+  range.setStartBefore(grp[0]); range.setEndAfter(grp[grp.length - 1]);
+  const r = range.getBoundingClientRect(), sr = editorScroll.getBoundingClientRect();
+  const f = clamp((pos - cum[i]) / (w[i] || 1), 0, 1);
+  const lineH = 19 * 1.75;
+  const y = r.top - sr.top + editorScroll.scrollTop + Math.min(f * r.height, Math.max(0, r.height - lineH));
+  marker.style.top = `${y + 4}px`;
+  if (S.pb.playing && document.activeElement !== editor) {
+    const want = y - editorScroll.clientHeight * 0.35;
+    editorScroll.scrollTop += (want - editorScroll.scrollTop) * 0.15;
+  }
+}
+
+// ---------- 대본 목록 ----------
+function fillScriptSelect() {
+  const sel = $('#scriptSelect');
+  sel.innerHTML = '';
+  for (const s of S.scripts) {
+    const o = document.createElement('option');
+    o.value = s.id; o.textContent = s.title || '제목 없음';
+    if (s.id === S.currentId) o.selected = true;
+    sel.appendChild(o);
+  }
+  $('#deleteScript').disabled = !S.scripts.length;
+  if (!S.scripts.length) { const o = document.createElement('option'); o.textContent = '대본 없음'; sel.appendChild(o); }
+}
+function switchScript(id, write) {
+  flushEditor();
+  S.currentId = id;
+  if (write) {
+    saveMeta();
+    display = 0;
+    applyPb({ playing: false, anchorPos: 0, elapsedBase: 0 });
+  }
+  fillScriptSelect(); loadEditor(); renderPrompter(); editorGroupsCache = null;
+}
+function createScript(html, focusTitle) {
+  flushEditor();
+  const now = Date.now();
+  const sc = { id: 's' + now.toString(36) + Math.random().toString(36).slice(2, 6), title: '새 대본', html: html || '', createdAt: now, updatedAt: now };
+  S.scripts.unshift(sc);
+  saveScript(sc);
+  S.currentId = sc.id;
+  saveMeta();
+  fillScriptSelect();
+  if (focusTitle) { switchScript(sc.id, true); titleInput.focus(); titleInput.select(); }
+  return sc;
+}
+$('#scriptSelect').onchange = e => switchScript(e.target.value, true);
+$('#newScript').onclick = () => createScript('', true);
+// confirm() 창이 막혀 있는 환경이라 버튼을 두 번 누르는 방식으로 삭제 확인
+let deleteArmed = null;
+$('#deleteScript').onclick = () => {
+  const btn = $('#deleteScript'), s = current();
+  if (!s) return;
+  if (deleteArmed !== s.id) {
+    deleteArmed = s.id; btn.textContent = '한 번 더 누르면 삭제';
+    setTimeout(() => { deleteArmed = null; btn.textContent = '삭제'; }, 3000);
+    return;
+  }
+  deleteArmed = null; btn.textContent = '삭제';
+  removeScript(s.id);
+  S.scripts = S.scripts.filter(x => x.id !== s.id);
+  editorDirty = false;
+  switchScript(S.scripts[0] ? S.scripts[0].id : null, true);
+};
+
+// ---------- 연결 상태 / 연결 창 ----------
+function setConn() {
+  const linked = sync.conns.size > 0;
+  const online = typeof Peer !== 'undefined';
+  $$('.conn .dot').forEach(d => { d.classList.toggle('on', linked); d.classList.toggle('off', !online); });
+  const others = S.peers.filter(p => !p.me);
+  const txt = !online ? '오프라인 · 이 기기에만 저장'
+    : linked && others.length ? `${others.map(p => p.name).join(', ')} 연결됨`
+    : sync.role === 'hub' ? `코드 ${fmtCode(sync.code)} · 다른 기기 기다리는 중`
+    : '연결 중…';
+  $$('.conn-text').forEach(t => t.textContent = txt);
+  $('#myCode').textContent = fmtCode(sync.code);
+  const pl = $('#peerList');
+  pl.innerHTML = '';
+  for (const p of (S.peers.length ? S.peers : [{ name: deviceName, me: true }])) {
+    const sp = document.createElement('span');
+    sp.className = 'peer' + (p.me ? ' me' : '');
+    sp.textContent = p.name + (p.me ? ' (이 기기)' : '');
+    pl.appendChild(sp);
+  }
+  $('#offlineNote').classList.toggle('hidden', online);
+}
+function pairLink() { return `${location.origin}${location.pathname}#${sync.code}`; }
+function drawQr() {
+  const box = $('#qrBox');
+  box.innerHTML = '';
+  $('#pairLink').textContent = pairLink();
+  if (typeof QRCode === 'undefined') { box.classList.add('hidden'); return; }
+  box.classList.remove('hidden');
+  new QRCode(box, { text: pairLink(), width: 176, height: 176, colorDark: '#111111', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.M });
+}
+function useCode(code) {
+  sync.code = code;
+  local.set('code', code);
+  startSync(code);
+  drawQr();
+}
+$('#connInfoBtn').onclick = () => { drawQr(); setConn(); $('#codeError').textContent = ''; $('#connModal').classList.remove('hidden'); };
+$('#connClose').onclick = () => $('#connModal').classList.add('hidden');
+$('#joinForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const code = cleanCode($('#codeInput').value);
+  if (code.length !== 6) { $('#codeError').textContent = '코드는 영문·숫자 6자리예요. 예: K7Q-2MX'; return; }
+  $('#codeInput').value = '';
+  $('#codeError').textContent = '';
+  useCode(code);
+});
+$('#regenCode').onclick = () => useCode(newCode());
+$('#copyLink').onclick = async () => {
+  try { await navigator.clipboard.writeText(pairLink()); $('#copyLink').textContent = '복사됨'; }
+  catch { const r = document.createRange(); r.selectNodeContents($('#pairLink')); getSelection().removeAllRanges(); getSelection().addRange(r); }
+  setTimeout(() => $('#copyLink').textContent = '링크 복사', 1500);
+};
+
+// ---------- 다른 기기에서 온 변경 반영 ----------
+const SAFE_DEVICE = /^(iPad|iPhone|Mac|Android|PC)$/;
+function onSettingsDoc(d) {
+  if (!d || typeof d !== 'object') return;
+  const prevBlank = S.settings.blankWeight;
+  const next = { ...DEFAULT_SETTINGS };
+  for (const k of Object.keys(DEFAULT_SETTINGS)) if (typeof d[k] === typeof DEFAULT_SETTINGS[k]) next[k] = d[k];
+  S.settings = next;
+  if (next.blankWeight !== prevBlank) renderPrompter();
+  applySettings();
+}
+function onPlaybackDoc(d) {
+  if (!d || typeof d !== 'object') return;
+  S.pb = {
+    playing: !!d.playing, anchorPos: +d.anchorPos || 0, anchorTime: +d.anchorTime || serverNow(),
+    elapsedBase: +d.elapsedBase || 0, cpm: +d.cpm || S.settings.cpm,
+  };
+  showUI();
+}
+function onMetaDoc(id) {
+  if (typeof id !== 'string' || id === S.currentId) return;
+  if (S.scripts.find(x => x.id === id)) switchScript(id, false);
+  else S.currentId = id;
+}
+function cleanScript(r) {
+  return { id: String(r.id).slice(0, 64), title: String(r.title || '').slice(0, 200), html: String(r.html || ''),
+    createdAt: +r.createdAt || 0, updatedAt: +r.updatedAt || 0 };
+}
+function mergeScripts(incoming) {
+  const prev = current();
+  const prevId = prev && prev.id, prevHtml = prev && prev.html, prevTitle = prev && prev.title;
+  const map = new Map(S.scripts.map(x => [x.id, x]));
+  for (const r of incoming) {
+    if (!r || typeof r.id !== 'string') continue;
+    const sc = cleanScript(r), have = map.get(sc.id);
+    if (!have || sc.updatedAt > have.updatedAt) map.set(sc.id, sc);
+  }
+  S.scripts = [...map.values()].filter(x => !(meta.tomb[x.id] >= x.updatedAt)).sort((a, b) => b.createdAt - a.createdAt);
+  persist();
+  if (!S.scripts.find(x => x.id === S.currentId)) S.currentId = S.scripts[0] ? S.scripts[0].id : null;
+  const cur = current();
+  fillScriptSelect();
+  if (!cur) { if (!editorDirty) loadEditor(); renderPrompter(); return; }
+  if (prevId === cur.id && prevHtml === cur.html && prevTitle === cur.title) return;
+  if (document.activeElement === editor && prevId === cur.id) pendingRemoteHtml = normalizeHtml(cur.html);
+  else { editor.innerHTML = normalizeHtml(cur.html); editorGroupsCache = null; editorDirty = false; }
+  if (document.activeElement !== titleInput) titleInput.value = cur.title;
+  renderPrompter();
+}
+function mergeState(st) {
+  if (!st || typeof st !== 'object') return;
+  for (const [id, ts] of Object.entries(st.tomb || {})) if (+ts > (meta.tomb[id] || 0)) meta.tomb[id] = +ts;
+  if (+st.settingsTs > meta.settingsTs) { meta.settingsTs = +st.settingsTs; onSettingsDoc(st.settings); }
+  if (+st.pbTs > meta.pbTs) { meta.pbTs = +st.pbTs; onPlaybackDoc(st.pb); }
+  mergeScripts(Array.isArray(st.scripts) ? st.scripts : []);
+  if (+st.metaTs > meta.metaTs) { meta.metaTs = +st.metaTs; onMetaDoc(st.currentId); }
+  persist();
+}
+
+// 처음 열었을 때 보이는 예시 대본 (어느 기기든 같은 id라 중복되지 않음)
+const WELCOME = {
+  id: 'welcome', title: '사용 방법 (예시 대본)', createdAt: 0, updatedAt: 0,
+  html: '<h2>사용 방법</h2><div>맥북에서 대본을 쓰고, 아이패드에서 <b>프롬프터</b> 화면을 열면 두 기기가 실시간으로 연동됩니다.</div><div><br></div>' +
+    '<h2>기기 연결</h2><div><b>1.</b> 맥북 상단의 연결 표시를 눌러 QR 코드를 띄우세요.</div><div><b>2.</b> 아이패드 카메라로 QR을 찍거나, 아이패드에서 이 사이트를 열고 6자리 코드를 입력하세요.</div><div><b>3.</b> 한 번 연결하면 다음부터는 열기만 해도 자동으로 다시 연결돼요.</div><div><br></div>' +
+    '<h2>편집과 재생</h2><div><b>굵게</b>, <i>기울임</i>, <u>밑줄</u>, <span style="color:#ff5c5c">색상</span>으로 강조하고, 줄을 선택해 「개요」를 누르면 오른쪽 목차가 생겨요.</div><div>스페이스바 또는 화면 탭으로 재생/정지, ↑ ↓ 키로 속도, + − 키로 글자 크기를 바꿉니다.</div>',
+};
+function loadPersisted() {
+  let d = null;
+  try { d = JSON.parse(localStorage.getItem(LS_KEY) || 'null'); } catch {}
+  if (!d) { S.scripts = [{ ...WELCOME }]; S.currentId = WELCOME.id; return; }
+  Object.assign(meta, { settingsTs: +d.settingsTs || 0, metaTs: +d.metaTs || 0, pbTs: +d.pbTs || 0, tomb: d.tomb || {} });
+  onSettingsDoc(d.settings);
+  S.scripts = (Array.isArray(d.scripts) ? d.scripts : []).filter(r => r && typeof r.id === 'string').map(cleanScript);
+  S.currentId = typeof d.currentId === 'string' ? d.currentId : null;
+  if (!S.scripts.find(x => x.id === S.currentId)) S.currentId = S.scripts[0] ? S.scripts[0].id : null;
+  if (d.pb) { onPlaybackDoc(d.pb); S.pb.playing = false; }
+}
+
+// ---------- 화면 꺼짐 방지 (지원되는 환경에서만) ----------
+let wakeLock = null;
+async function requestWakeLock() {
+  try { if ('wakeLock' in navigator && !wakeLock) { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.onrelease = () => wakeLock = null; } } catch {}
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    if (!$('#prompterView').classList.contains('hidden')) requestWakeLock();
+    // 아이패드가 잠들었다 깨면 연결이 끊겨 있을 수 있음
+    if (!sync.conns.size || !sync.peer || sync.peer.destroyed || sync.peer.disconnected) startSync(sync.code);
+  }
+});
+
+// ---------- 시작 ----------
+window.addEventListener('resize', () => { measure(); });
+if (document.fonts) document.fonts.ready.then(() => measure());
+loadPersisted();
+fillScriptSelect();
+loadEditor();
+applySettings();
+renderPrompter();
+display = currentPos();
+// 연결 코드: 링크(#코드)로 열었으면 그 코드, 아니면 이 기기에 저장된 코드, 없으면 새로 만듦
+const hashCode = cleanCode(location.hash.slice(1));
+let code = hashCode.length === 6 ? hashCode : cleanCode(local.get('code', ''));
+if (code.length !== 6) code = newCode();
+local.set('code', code);
+if (hashCode) history.replaceState(null, '', location.pathname + location.search);
+showView(local.get('view', isIPad ? 'prompter' : 'editor'));
+S.ready = true;
+requestAnimationFrame(frame);
+startSync(code);
+})();
+
+</script>
+</body>
+</html>
