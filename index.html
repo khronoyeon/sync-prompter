@@ -470,7 +470,7 @@ html, body { height: 100%; }
 <div id="connModal" class="modal hidden">
   <div class="modal-card">
     <h3>기기 연결</h3>
-    <p class="muted small">같은 코드를 쓰는 기기끼리 실시간으로 연결돼요. 와이파이가 달라도 인터넷만 되면 됩니다.</p>
+    <p class="muted small">같은 코드를 쓰는 기기끼리 실시간으로 연결돼요. 와이파이가 달라도, 셀룰러여도 인터넷만 되면 됩니다. 대본은 코드로 암호화되어 오가요.</p>
     <div class="pair">
       <div id="qrBox" class="qr"></div>
       <div class="pair-info">
@@ -483,7 +483,7 @@ html, body { height: 100%; }
     <form id="joinForm" class="join">
       <label for="codeInput" class="muted small">다른 기기의 코드로 연결</label>
       <div class="join-row">
-        <input id="codeInput" class="code-input" placeholder="예: K7Q-2MX" maxlength="7" autocomplete="off" autocapitalize="characters" spellcheck="false">
+        <input id="codeInput" class="code-input" placeholder="예: K7Q2-MXA4" maxlength="9" autocomplete="off" autocapitalize="characters" spellcheck="false">
         <button class="btn primary" type="submit">연결</button>
       </div>
       <div id="codeError" class="error small"></div>
@@ -501,7 +501,7 @@ html, body { height: 100%; }
 
 <div id="toast" class="toast hidden"></div>
 
-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.10.1/mqtt.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
 // 싱크 프롬프터 — 맥북/아이패드 실시간 연동
@@ -545,9 +545,8 @@ const S = {
 const current = () => S.scripts.find(s => s.id === S.currentId);
 
 // 애플 기기끼리는 시계가 자동으로 맞춰져 있어 각 기기의 현재 시각을 그대로 기준으로 씀
-// 연결된 기기들 중 '허브' 기기의 시계를 기준으로 맞춤 (연결 전에는 내 시계)
-let clockOffset = 0;
-const serverNow = () => Date.now() + clockOffset;
+// 각 기기의 시계 기준. 다른 기기에서 온 재생 정보는 받을 때 내 시계로 옮겨서 씀
+const serverNow = () => Date.now();
 
 // ---------- 이 기기에 저장 ----------
 const LS_KEY = 'ps.state.v1';
@@ -563,26 +562,83 @@ function snapshot() {
   return { settings: S.settings, scripts: S.scripts, currentId: S.currentId, pb: S.pb, ...meta };
 }
 
-// ---------- 기기 간 직접 연결 (P2P) ----------
-// 같은 연결 코드를 가진 기기 중 먼저 들어온 기기가 '허브'가 되고, 나머지는 허브에 붙어서 변경을 주고받음.
-// 연결을 맺을 때만 PeerJS 공개 중계 서버를 쓰고, 이후 데이터는 기기끼리 직접 오감.
-const HUB_PREFIX = 'syncprompter-v1-';
+// 변경 시각은 항상 이전 값보다 커지게
+const stamp = prev => Math.max(Date.now(), (prev || 0) + 1);
+
+// ---------- 기기 간 연동 (공개 MQTT 중계 서버 경유, 암호화) ----------
+// 각 기기는 바깥으로만 접속하므로 와이파이/방화벽과 상관없이 연결됨.
+// 같은 연결 코드에서 만든 주제(topic)로 메시지를 주고받고, 내용은 코드로 만든 키로 암호화해 중계 서버도 읽을 수 없음.
+// 중계 서버 두 곳에 동시에 접속해 한쪽이 막혀도 동작하고, 중복 메시지는 id로 걸러냄.
+const BROKERS = ['wss://broker.emqx.io:8084/mqtt', 'wss://broker.hivemq.com:8884/mqtt'];
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-const sync = { peer: null, role: null, conns: new Set(), code: null, retryTimer: null, bestRtt: Infinity };
-const RELAY = new Set(['settings', 'pb', 'meta', 'script', 'delete']);
+const sync = { code: null, key: null, base: null, clients: [], peers: new Map(), seen: new Set(), seenQ: [], gen: 0, statePubTimer: null };
 
 function newCode() {
-  const a = new Uint32Array(6); crypto.getRandomValues(a);
+  const a = new Uint32Array(8); crypto.getRandomValues(a);
   return [...a].map(n => CODE_ALPHABET[n % CODE_ALPHABET.length]).join('');
 }
-const fmtCode = c => c ? `${c.slice(0, 3)}-${c.slice(3)}` : '------';
+const fmtCode = c => !c ? '------' : c.length === 8 ? `${c.slice(0, 4)}-${c.slice(4)}` : `${c.slice(0, 3)}-${c.slice(3)}`;
 const cleanCode = v => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+const validCode = c => c.length === 6 || c.length === 8;
 
-function broadcast(msg, except) {
-  for (const c of sync.conns) if (c !== except && c.open) { try { c.send(msg); } catch {} }
+const enc = new TextEncoder(), dec = new TextDecoder();
+async function deriveKey(code) {
+  const base = await crypto.subtle.importKey('raw', enc.encode(code), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({ name: 'PBKDF2', salt: enc.encode('syncprompter-v2'), iterations: 150000, hash: 'SHA-256' },
+    base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
 }
-// 변경 시각은 항상 이전 값보다 커지게 (기기 시계가 조금 달라도 순서가 뒤집히지 않음)
-const stamp = prev => Math.max(serverNow(), (prev || 0) + 1);
+async function topicBase(code) {
+  const h = new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode('syncprompter-topic:' + code)));
+  return 'syncprompter/v2/' + [...h.slice(0, 16)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+const canZip = typeof CompressionStream !== 'undefined';
+async function pipeBytes(bytes, stream) { return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer()); }
+async function seal(obj) {
+  let body = enc.encode(JSON.stringify(obj)), flag = 0;
+  if (canZip && body.length > 512) { body = await pipeBytes(body, new CompressionStream('gzip')); flag = 1; }
+  const plain = new Uint8Array(body.length + 1); plain[0] = flag; plain.set(body, 1);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, sync.key, plain));
+  const out = new Uint8Array(12 + ct.length); out.set(iv); out.set(ct, 12);
+  return out;
+}
+async function unseal(bytes, key) {
+  const u = new Uint8Array(bytes);
+  const plain = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: u.slice(0, 12) }, key, u.slice(12)));
+  let body = plain.slice(1);
+  if (plain[0] === 1) body = await pipeBytes(body, new DecompressionStream('gzip'));
+  return JSON.parse(dec.decode(body));
+}
+
+const liveTopic = () => sync.base + '/live';
+const stateTopic = () => sync.base + '/state';
+async function publish(topic, obj, retain) {
+  if (!sync.key) return;
+  const bytes = await seal(obj);
+  for (const c of sync.clients) if (c.connected) c.publish(topic, bytes, { qos: 0, retain: !!retain });
+}
+// 같은 종류의 연속 변경(슬라이더 드래그 등)은 100ms마다 최신 값 하나만 보냄
+const liveQueue = new Map();
+let liveTimer = null;
+function broadcast(msg) {
+  const key = msg.type === 'script' ? 'script:' + msg.script.id : msg.type === 'delete' ? 'delete:' + msg.id : msg.type;
+  liveQueue.set(key, { ...msg, from: TAB, sentAt: Date.now() });
+  scheduleStatePublish();
+  if (liveTimer) return;
+  const flush = () => {
+    if (!liveQueue.size) { liveTimer = null; return; }
+    const batch = [...liveQueue.values()]; liveQueue.clear();
+    for (const m of batch) publish(liveTopic(), { ...m, mid: Math.random().toString(36).slice(2), sentAt: Date.now() });
+    liveTimer = setTimeout(flush, 100);
+  };
+  flush();
+}
+// 나중에 켜진 기기를 위해 전체 상태를 '보관 메시지'로 남겨둠
+function scheduleStatePublish(delay = 600) {
+  clearTimeout(sync.statePubTimer);
+  sync.statePubTimer = setTimeout(() => publish(stateTopic(), { from: TAB, state: snapshot() }, true), delay);
+}
+
 const savePlayback = () => { meta.pbTs = stamp(meta.pbTs); persist(); broadcast({ type: 'pb', data: S.pb, ts: meta.pbTs }); };
 const saveSettings = () => { meta.settingsTs = stamp(meta.settingsTs); persist(); broadcast({ type: 'settings', data: S.settings, ts: meta.settingsTs }); };
 const saveMeta = () => { meta.metaTs = stamp(meta.metaTs); persist(); broadcast({ type: 'meta', currentId: S.currentId, ts: meta.metaTs }); };
@@ -598,110 +654,81 @@ function removeScript(id) {
   broadcast({ type: 'delete', id, ts: meta.tomb[id] });
 }
 
-function startSync(code) {
-  clearTimeout(sync.retryTimer);
-  if (sync.peer) { try { sync.peer.destroy(); } catch {} }
-  sync.peer = null; sync.conns.clear(); sync.role = null; sync.code = code; sync.bestRtt = Infinity;
-  S.peers = [];
+async function startSync(code) {
+  const gen = ++sync.gen;
+  for (const c of sync.clients) { try { c.end(true); } catch {} }
+  sync.clients = []; sync.peers.clear(); sync.code = code; sync.key = null;
   setConn();
-  if (typeof Peer === 'undefined') return; // 인터넷이 없으면 이 기기에서만 동작
-  const p = new Peer(HUB_PREFIX + code, { debug: 0 });
-  sync.peer = p;
-  p.on('open', () => { if (sync.peer !== p) return; sync.role = 'hub'; clockOffset = 0; sendPeers(); });
-  p.on('connection', c => { if (sync.peer === p) setupConn(c, p); });
-  p.on('disconnected', () => { if (sync.peer === p && !p.destroyed) { try { p.reconnect(); } catch {} } });
-  p.on('error', err => {
-    if (sync.peer !== p) return;
-    if (err.type === 'unavailable-id') joinAsClient(code);
-    else scheduleRetry();
+  if (typeof mqtt === 'undefined' || !crypto.subtle) return; // 인터넷이 없으면 이 기기에서만 동작
+  const [key, base] = await Promise.all([deriveKey(code), topicBase(code)]);
+  if (gen !== sync.gen) return;
+  sync.key = key; sync.base = base;
+  sync.clients = BROKERS.map((url, i) => {
+    const c = mqtt.connect(url, { clientId: `sp_${TAB}_${i}_${Math.random().toString(36).slice(2, 6)}`, clean: true,
+      keepalive: 20, reconnectPeriod: 2000, connectTimeout: 8000, resubscribe: true });
+    c.on('connect', () => {
+      if (gen !== sync.gen) return;
+      c.subscribe([liveTopic(), stateTopic()], { qos: 0 });
+      sendHeartbeat();
+      // 보관된 상태를 먼저 받아 합친 뒤 내 상태를 올림
+      scheduleStatePublish(2500);
+      setConn();
+    });
+    c.on('message', (topic, payload) => { if (gen === sync.gen) onPayload(topic, payload, key); });
+    c.on('close', () => setConn());
+    c.on('error', () => {});
+    return c;
   });
 }
-function joinAsClient(code) {
-  try { sync.peer.destroy(); } catch {}
-  const p = new Peer({ debug: 0 });
-  sync.peer = p;
-  p.on('open', () => {
-    if (sync.peer !== p) return;
-    sync.role = 'client';
-    const c = p.connect(HUB_PREFIX + code, { reliable: true });
-    setupConn(c, p);
-    setTimeout(() => { if (sync.peer === p && !c.open) scheduleRetry(); }, 10000);
-  });
-  p.on('disconnected', () => { if (sync.peer === p && !p.destroyed) { try { p.reconnect(); } catch {} } });
-  p.on('error', () => { if (sync.peer === p) scheduleRetry(); }); // 허브가 사라졌으면 내가 허브가 되도록 다시 시도
-}
-function scheduleRetry() {
-  clearTimeout(sync.retryTimer);
-  sync.role = null; S.peers = [];
-  setConn();
-  sync.retryTimer = setTimeout(() => startSync(sync.code), 1500 + Math.random() * 2500);
-}
-function setupConn(c, p) {
-  c.on('open', () => {
-    if (sync.peer !== p) { try { c.close(); } catch {} return; }
-    sync.conns.add(c);
-    c.send({ type: 'hello', state: snapshot(), device: deviceName });
-    if (sync.role === 'client') for (let i = 0; i < 5; i++) setTimeout(() => { if (c.open) c.send({ type: 'ping', t0: Date.now() }); }, i * 400);
-    setConn();
-  });
-  c.lastSeen = Date.now();
-  c.on('data', m => { c.lastSeen = Date.now(); try { onMsg(m, c); } catch (e) { console.warn(e); } });
-  const gone = () => {
-    if (!sync.conns.delete(c)) return;
-    if (sync.role === 'hub') sendPeers(); else scheduleRetry();
-  };
-  c.gone = gone;
-  c.on('close', gone);
-  c.on('error', gone);
-}
-setInterval(() => {
-  for (const c of [...sync.conns]) {
-    if (Date.now() - c.lastSeen > 9000) { try { c.close(); } catch {} c.gone(); }
-    else if (c.open) { try { c.send({ type: 'hb' }); } catch {} }
+async function onPayload(topic, payload, key) {
+  let m;
+  try { m = await unseal(payload, key); } catch { return; } // 다른 코드의 메시지거나 손상됨
+  if (!m || typeof m !== 'object' || m.from === TAB) return;
+  if (m.mid) {
+    if (sync.seen.has(m.mid)) return;
+    sync.seen.add(m.mid); sync.seenQ.push(m.mid);
+    if (sync.seenQ.length > 500) sync.seen.delete(sync.seenQ.shift());
   }
-}, 3000);
-function sendPeers() {
-  if (sync.role !== 'hub') return;
-  const list = [{ id: sync.peer.id, name: deviceName }, ...[...sync.conns].map(c => ({ id: c.peer, name: c.deviceName || '기기' }))];
-  S.peers = list.map(x => ({ name: x.name, me: x.id === sync.peer.id }));
-  broadcast({ type: 'peers', list });
-  setConn();
+  if (topic.endsWith('/state')) {
+    if (mergeState(m.state)) scheduleStatePublish(); // 내가 더 최신이면 보관 상태를 갱신
+    return;
+  }
+  onMsg(m);
 }
 
-function onMsg(m, conn) {
-  if (!m || typeof m !== 'object') return;
-  if (sync.role === 'hub' && RELAY.has(m.type)) broadcast(m, conn);
+// 3초마다 '나 여기 있어' 신호. 8초 넘게 소식이 없으면 연결 끊긴 것으로 봄
+function sendHeartbeat() { publish(liveTopic(), { type: 'hb', from: TAB, device: deviceName, mid: Math.random().toString(36).slice(2) }); }
+setInterval(() => {
+  sendHeartbeat();
+  let changed = false;
+  for (const [id, p] of sync.peers) if (Date.now() - p.last > 8000) { sync.peers.delete(id); changed = true; }
+  if (changed) setConn();
+}, 3000);
+
+function onMsg(m) {
+  const had = sync.peers.has(m.from);
+  sync.peers.set(m.from, { name: SAFE_DEVICE.test(m.device) ? m.device : (sync.peers.get(m.from) || {}).name || '기기', last: Date.now() });
+  if (!had) { setConn(); scheduleStatePublish(300); }
   switch (m.type) {
-    case 'hello':
-      conn.deviceName = SAFE_DEVICE.test(m.device) ? m.device : '기기';
-      mergeState(m.state);
-      if (sync.role === 'hub') { sendPeers(); broadcast({ type: 'hello', state: snapshot(), device: deviceName }, conn); }
-      break;
-    case 'peers':
-      if (sync.role === 'client' && Array.isArray(m.list)) {
-        S.peers = m.list.slice(0, 16).map(x => ({ name: SAFE_DEVICE.test(x && x.name) ? x.name : '기기', me: x && x.id === sync.peer.id }));
-        setConn();
-      }
-      break;
-    case 'ping': conn.send({ type: 'pong', t0: m.t0, th: Date.now() }); break;
-    case 'pong': {
-      const t1 = Date.now(), rtt = t1 - m.t0;
-      if (rtt >= 0 && rtt < sync.bestRtt) { sync.bestRtt = rtt; clockOffset = +m.th - (m.t0 + t1) / 2; }
-      break;
-    }
     // 연결 중에 오는 변경은 방금 일어난 일이므로 시각 비교 없이 바로 반영
     case 'settings': meta.settingsTs = Math.max(meta.settingsTs, +m.ts || 0); onSettingsDoc(m.data); persist(); break;
-    case 'pb': meta.pbTs = Math.max(meta.pbTs, +m.ts || 0); onPlaybackDoc(m.data); persist(); break;
+    case 'pb': {
+      meta.pbTs = Math.max(meta.pbTs, +m.ts || 0);
+      // 기기 시계 차이를 없애기 위해, 보낸 순간을 '지금'으로 보고 내 시계로 옮김 (오차는 전송 지연뿐)
+      const d = { ...(m.data || {}) };
+      if (+m.sentAt && +d.anchorTime) d.anchorTime = Date.now() - (+m.sentAt - +d.anchorTime);
+      onPlaybackDoc(d); persist();
+      break;
+    }
     case 'meta': meta.metaTs = Math.max(meta.metaTs, +m.ts || 0); onMetaDoc(m.currentId); persist(); break;
     case 'script': mergeScripts([m.script], true); break;
     case 'delete': {
       if (typeof m.id !== 'string') break;
-      const had = S.scripts.find(x => x.id === m.id);
-      meta.tomb[m.id] = Math.max(+m.ts || 0, had ? had.updatedAt + 1 : 0, meta.tomb[m.id] || 0);
+      const had2 = S.scripts.find(x => x.id === m.id);
+      meta.tomb[m.id] = Math.max(+m.ts || 0, had2 ? had2.updatedAt + 1 : 0, meta.tomb[m.id] || 0);
       mergeScripts([]);
       break;
     }
-    case 'hb': break;
   }
 }
 
@@ -1317,19 +1344,21 @@ $('#deleteScript').onclick = () => {
 
 // ---------- 연결 상태 / 연결 창 ----------
 function setConn() {
-  const linked = sync.conns.size > 0;
-  const online = typeof Peer !== 'undefined';
+  const online = typeof mqtt !== 'undefined';
+  const relay = sync.clients.some(c => c.connected);
+  const others = [...sync.peers.values()];
+  S.peers = [{ name: deviceName, me: true }, ...others.map(p => ({ name: p.name, me: false }))];
+  const linked = others.length > 0;
   $$('.conn .dot').forEach(d => { d.classList.toggle('on', linked); d.classList.toggle('wait', online && !linked); d.classList.toggle('off', !online); });
-  const others = S.peers.filter(p => !p.me);
   const txt = !online ? '오프라인 · 이 기기에만 저장'
-    : linked && others.length ? `${others.map(p => p.name).join(', ')} 연결됨`
-    : sync.role === 'hub' ? `코드 ${fmtCode(sync.code)} · 다른 기기 기다리는 중`
-    : '연결 중…';
+    : linked ? `${others.map(p => p.name).join(', ')} 연결됨`
+    : relay ? `코드 ${fmtCode(sync.code)} · 다른 기기 기다리는 중`
+    : '인터넷 연결 중…';
   $$('.conn-text').forEach(t => t.textContent = txt);
   $('#myCode').textContent = fmtCode(sync.code);
   const pl = $('#peerList');
   pl.innerHTML = '';
-  for (const p of (S.peers.length ? S.peers : [{ name: deviceName, me: true }])) {
+  for (const p of S.peers) {
     const sp = document.createElement('span');
     sp.className = 'peer' + (p.me ? ' me' : '');
     sp.textContent = p.name + (p.me ? ' (이 기기)' : '');
@@ -1360,7 +1389,7 @@ $('#connClose').onclick = () => $('#connModal').classList.add('hidden');
 $('#joinForm').addEventListener('submit', e => {
   e.preventDefault();
   const code = cleanCode($('#codeInput').value);
-  if (code.length !== 6) { $('#codeError').textContent = '코드는 영문·숫자 6자리예요. 예: K7Q-2MX'; return; }
+  if (!validCode(code)) { $('#codeError').textContent = '코드는 영문·숫자 8자리예요. 예: K7Q2-MXA4'; return; }
   $('#codeInput').value = '';
   $('#codeError').textContent = '';
   useCode(code);
@@ -1423,14 +1452,22 @@ function mergeScripts(incoming, live) {
   if (document.activeElement !== titleInput) titleInput.value = cur.title;
   renderPrompter();
 }
+// 받은 상태와 합침. 내 쪽에 더 최신 내용이 있으면 true (보관 상태를 내가 갱신해야 함)
 function mergeState(st) {
-  if (!st || typeof st !== 'object') return;
-  for (const [id, ts] of Object.entries(st.tomb || {})) if (+ts > (meta.tomb[id] || 0)) meta.tomb[id] = +ts;
+  if (!st || typeof st !== 'object') return false;
+  const theirTomb = st.tomb || {};
+  let mineNewer = +st.settingsTs < meta.settingsTs || +st.pbTs < meta.pbTs || +st.metaTs < meta.metaTs;
+  for (const [id, ts] of Object.entries(meta.tomb)) if (!(+theirTomb[id] >= ts)) mineNewer = true;
+  const theirs = new Map((Array.isArray(st.scripts) ? st.scripts : []).filter(r => r && typeof r.id === 'string').map(r => [r.id, +r.updatedAt || 0]));
+  for (const sc of S.scripts) if (!(theirs.get(sc.id) >= sc.updatedAt)) mineNewer = true;
+
+  for (const [id, ts] of Object.entries(theirTomb)) if (+ts > (meta.tomb[id] || 0)) meta.tomb[id] = +ts;
   if (+st.settingsTs > meta.settingsTs) { meta.settingsTs = +st.settingsTs; onSettingsDoc(st.settings); }
   if (+st.pbTs > meta.pbTs) { meta.pbTs = +st.pbTs; onPlaybackDoc(st.pb); }
   mergeScripts(Array.isArray(st.scripts) ? st.scripts : []);
   if (+st.metaTs > meta.metaTs) { meta.metaTs = +st.metaTs; onMetaDoc(st.currentId); }
   persist();
+  return mineNewer;
 }
 
 // 처음 열었을 때 보이는 예시 대본 (어느 기기든 같은 id라 중복되지 않음)
@@ -1461,10 +1498,8 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     if (!$('#prompterView').classList.contains('hidden')) requestWakeLock();
     // 아이패드가 잠들었다 깨면 연결이 끊겨 있을 수 있음
-    const p = sync.peer;
-    if (!p || p.destroyed) startSync(sync.code);
-    else if (p.disconnected) { try { p.reconnect(); } catch { startSync(sync.code); } }
-    else if (sync.role !== 'hub' && !sync.conns.size) startSync(sync.code);
+    for (const c of sync.clients) if (!c.connected) { try { c.reconnect(); } catch {} }
+    sendHeartbeat();
   }
 });
 
@@ -1482,7 +1517,7 @@ display = currentPos();
 const hashCode = cleanCode(location.hash.slice(1));
 const queryCode = cleanCode(new URLSearchParams(location.search).get('c'));
 const storedCode = cleanCode(local.get('code', ''));
-let code = [hashCode, storedCode, queryCode].find(c => c.length === 6) || newCode();
+let code = [hashCode, storedCode, queryCode].find(validCode) || newCode();
 local.set('code', code);
 codeInUrl(code);
 showView(local.get('view', isIPad ? 'prompter' : 'editor'));
