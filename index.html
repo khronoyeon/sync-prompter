@@ -96,6 +96,7 @@ input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border-radius: 
   color: var(--ui-muted); border-radius: 999px; padding: 6px 12px; font: inherit; cursor: pointer; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: #666; flex: none; }
 .dot.on { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+.dot.wait { background: var(--warn); }
 .dot.off { background: var(--danger); }
 
 /* ---------- 편집 화면 ---------- */
@@ -487,6 +488,7 @@ html, body { height: 100%; }
       </div>
       <div id="codeError" class="error small"></div>
     </form>
+    <p class="muted small">아이패드에서 <b>홈 화면에 추가</b>할 때는 이 창에서 두 기기의 코드가 같은지 먼저 확인하세요. 홈 화면 앱은 Safari와 저장 공간이 따로라서, 코드가 다르면 「다른 기기의 코드로 연결」에 맥북 코드를 한 번 입력하면 됩니다.</p>
     <p id="offlineNote" class="warn small hidden">인터넷에 연결되어 있지 않아 지금은 이 기기에만 저장돼요. 인터넷이 연결되면 새로고침해 주세요.</p>
     <div class="muted small">지금 연결된 기기</div>
     <div id="peerList" class="peer-list"></div>
@@ -579,17 +581,19 @@ const cleanCode = v => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 function broadcast(msg, except) {
   for (const c of sync.conns) if (c !== except && c.open) { try { c.send(msg); } catch {} }
 }
-const savePlayback = () => { meta.pbTs = serverNow(); persist(); broadcast({ type: 'pb', data: S.pb, ts: meta.pbTs }); };
-const saveSettings = () => { meta.settingsTs = serverNow(); persist(); broadcast({ type: 'settings', data: S.settings, ts: meta.settingsTs }); };
-const saveMeta = () => { meta.metaTs = serverNow(); persist(); broadcast({ type: 'meta', currentId: S.currentId, ts: meta.metaTs }); };
+// 변경 시각은 항상 이전 값보다 커지게 (기기 시계가 조금 달라도 순서가 뒤집히지 않음)
+const stamp = prev => Math.max(serverNow(), (prev || 0) + 1);
+const savePlayback = () => { meta.pbTs = stamp(meta.pbTs); persist(); broadcast({ type: 'pb', data: S.pb, ts: meta.pbTs }); };
+const saveSettings = () => { meta.settingsTs = stamp(meta.settingsTs); persist(); broadcast({ type: 'settings', data: S.settings, ts: meta.settingsTs }); };
+const saveMeta = () => { meta.metaTs = stamp(meta.metaTs); persist(); broadcast({ type: 'meta', currentId: S.currentId, ts: meta.metaTs }); };
 function saveScript(s) {
   if (!s) return;
-  s.updatedAt = serverNow();
+  s.updatedAt = stamp(s.updatedAt);
   persist();
   broadcast({ type: 'script', script: { ...s } });
 }
 function removeScript(id) {
-  meta.tomb[id] = serverNow();
+  meta.tomb[id] = stamp(meta.tomb[id]);
   persist();
   broadcast({ type: 'delete', id, ts: meta.tomb[id] });
 }
@@ -640,14 +644,22 @@ function setupConn(c, p) {
     if (sync.role === 'client') for (let i = 0; i < 5; i++) setTimeout(() => { if (c.open) c.send({ type: 'ping', t0: Date.now() }); }, i * 400);
     setConn();
   });
-  c.on('data', m => { try { onMsg(m, c); } catch (e) { console.warn(e); } });
+  c.lastSeen = Date.now();
+  c.on('data', m => { c.lastSeen = Date.now(); try { onMsg(m, c); } catch (e) { console.warn(e); } });
   const gone = () => {
     if (!sync.conns.delete(c)) return;
     if (sync.role === 'hub') sendPeers(); else scheduleRetry();
   };
+  c.gone = gone;
   c.on('close', gone);
   c.on('error', gone);
 }
+setInterval(() => {
+  for (const c of [...sync.conns]) {
+    if (Date.now() - c.lastSeen > 9000) { try { c.close(); } catch {} c.gone(); }
+    else if (c.open) { try { c.send({ type: 'hb' }); } catch {} }
+  }
+}, 3000);
 function sendPeers() {
   if (sync.role !== 'hub') return;
   const list = [{ id: sync.peer.id, name: deviceName }, ...[...sync.conns].map(c => ({ id: c.peer, name: c.deviceName || '기기' }))];
@@ -677,13 +689,19 @@ function onMsg(m, conn) {
       if (rtt >= 0 && rtt < sync.bestRtt) { sync.bestRtt = rtt; clockOffset = +m.th - (m.t0 + t1) / 2; }
       break;
     }
-    case 'settings': if (+m.ts > meta.settingsTs) { meta.settingsTs = +m.ts; onSettingsDoc(m.data); persist(); } break;
-    case 'pb': if (+m.ts > meta.pbTs) { meta.pbTs = +m.ts; onPlaybackDoc(m.data); persist(); } break;
-    case 'meta': if (+m.ts > meta.metaTs) { meta.metaTs = +m.ts; onMetaDoc(m.currentId); persist(); } break;
-    case 'script': mergeScripts([m.script]); break;
-    case 'delete':
-      if (typeof m.id === 'string' && +m.ts > (meta.tomb[m.id] || 0)) { meta.tomb[m.id] = +m.ts; mergeScripts([]); }
+    // 연결 중에 오는 변경은 방금 일어난 일이므로 시각 비교 없이 바로 반영
+    case 'settings': meta.settingsTs = Math.max(meta.settingsTs, +m.ts || 0); onSettingsDoc(m.data); persist(); break;
+    case 'pb': meta.pbTs = Math.max(meta.pbTs, +m.ts || 0); onPlaybackDoc(m.data); persist(); break;
+    case 'meta': meta.metaTs = Math.max(meta.metaTs, +m.ts || 0); onMetaDoc(m.currentId); persist(); break;
+    case 'script': mergeScripts([m.script], true); break;
+    case 'delete': {
+      if (typeof m.id !== 'string') break;
+      const had = S.scripts.find(x => x.id === m.id);
+      meta.tomb[m.id] = Math.max(+m.ts || 0, had ? had.updatedAt + 1 : 0, meta.tomb[m.id] || 0);
+      mergeScripts([]);
       break;
+    }
+    case 'hb': break;
   }
 }
 
@@ -760,31 +778,59 @@ function renderPrompter() {
   measure();
 }
 
-function measure() {
-  if ($('#prompterView').classList.contains('hidden')) { L.tops = []; return; }
-  const els = [...content.children];
-  L.tops = els.map(el => el.offsetTop);
-  const last = els[els.length - 1];
-  L.tops.push(last ? last.offsetTop + last.offsetHeight : 0);
+// 위치(글자 수) ↔ 화면 높이 변환표: 줄마다 '그 줄 첫 글자의 위치'와 '그 줄 가운데 높이'를 기록.
+// 기기마다 줄바꿈이 달라도 같은 글자가 가이드 라인에 오도록 실제 글자 위치를 잼.
+L.points = []; L.dirty = true;
+function measure() { L.dirty = true; }
+function ensureLayout() {
+  if (!L.dirty) return;
+  if ($('#prompterView').classList.contains('hidden')) { L.points = []; return; }
+  L.dirty = false;
   L.lineH = parseFloat(getComputedStyle(content).lineHeight) || 56;
   L.H = stage.clientHeight;
+  // 반전 상태에서는 좌표가 뒤집히므로 잴 때만 잠시 해제
+  const box = $('#mirrorBox'), saved = box.style.transform;
+  box.style.transform = 'none';
+  const origin = content.getBoundingClientRect().top;
+  const range = document.createRange();
+  const pts = [];
+  [...content.children].forEach((el, i) => {
+    let k = 0, lastY = -Infinity;
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const t = node.data;
+      for (let j = 0; j < t.length; j++) {
+        if (/\s/.test(t[j])) continue;
+        range.setStart(node, j); range.setEnd(node, j + 1);
+        const r = range.getClientRects()[0];
+        if (r) {
+          const y = (r.top + r.bottom) / 2 - origin;
+          if (y > lastY + r.height * 0.5) { pts.push({ pos: L.cum[i] + k, y }); lastY = y; }
+        }
+        k++;
+      }
+    }
+    if (!k) pts.push({ pos: L.cum[i], y: el.offsetTop + el.offsetHeight / 2 }); // 빈 줄
+  });
+  const last = content.lastElementChild;
+  pts.push({ pos: L.total, y: last ? last.offsetTop + last.offsetHeight : 0 });
+  box.style.transform = saved;
+  L.points = pts;
 }
-function posToOffset(pos) {
-  if (L.tops.length < 2) return 0;
-  const i = indexAt(L.cum, pos);
-  const f = clamp((pos - L.cum[i]) / (L.w[i] || 1), 0, 1);
-  return L.tops[i] + f * (L.tops[i + 1] - L.tops[i]);
+// 정렬된 표에서 key 값으로 구간을 찾아 선형 보간
+function interp(key, val, out) {
+  ensureLayout();
+  const P = L.points;
+  if (P.length < 2) return 0;
+  if (val <= P[0][key]) return P[0][out];
+  if (val >= P[P.length - 1][key]) return P[P.length - 1][out];
+  let lo = 0, hi = P.length - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (P[m][key] <= val) lo = m; else hi = m; }
+  const a = P[lo], b = P[hi], span = b[key] - a[key];
+  return span > 0 ? a[out] + (val - a[key]) / span * (b[out] - a[out]) : a[out];
 }
-function offsetToPos(y) {
-  if (L.tops.length < 2) return 0;
-  const n = L.w.length;
-  if (y <= 0) return 0;
-  if (y >= L.tops[n]) return L.total;
-  let i = indexAt(L.tops, y);
-  i = clamp(i, 0, n - 1);
-  const span = (L.tops[i + 1] - L.tops[i]) || 1;
-  return L.cum[i] + clamp((y - L.tops[i]) / span, 0, 1) * L.w[i];
-}
+const posToOffset = pos => interp('pos', pos, 'y');
+const offsetToPos = y => interp('y', y, 'pos');
 
 // ---------- 재생 ----------
 function currentPos() {
@@ -940,9 +986,9 @@ function frame(now) {
 
   const prompterOn = !$('#prompterView').classList.contains('hidden');
   if (prompterOn) {
-    if (!L.H) measure();
+    ensureLayout();
     const guideY = L.H * S.settings.guidePos / 100;
-    const ty = guideY - posToOffset(display) - L.lineH / 2;
+    const ty = guideY - posToOffset(display);
     content.style.transform = `translate3d(0, ${ty.toFixed(2)}px, 0)`;
     $('#guide').style.top = `${guideY - 1}px`;
     const band = L.lineH * 0.8;
@@ -1273,7 +1319,7 @@ $('#deleteScript').onclick = () => {
 function setConn() {
   const linked = sync.conns.size > 0;
   const online = typeof Peer !== 'undefined';
-  $$('.conn .dot').forEach(d => { d.classList.toggle('on', linked); d.classList.toggle('off', !online); });
+  $$('.conn .dot').forEach(d => { d.classList.toggle('on', linked); d.classList.toggle('wait', online && !linked); d.classList.toggle('off', !online); });
   const others = S.peers.filter(p => !p.me);
   const txt = !online ? '오프라인 · 이 기기에만 저장'
     : linked && others.length ? `${others.map(p => p.name).join(', ')} 연결됨`
@@ -1291,7 +1337,9 @@ function setConn() {
   }
   $('#offlineNote').classList.toggle('hidden', online);
 }
-function pairLink() { return `${location.origin}${location.pathname}#${sync.code}`; }
+function pairLink() { return `${location.origin}${location.pathname}?c=${sync.code}#${sync.code}`; }
+// 홈 화면에 추가하면 지금 주소가 저장되므로, 주소에 항상 현재 코드를 남겨둠 (홈 화면 앱은 Safari와 저장 공간이 따로임)
+function codeInUrl(code) { try { history.replaceState(null, '', `${location.pathname}?c=${code}`); } catch {} }
 function drawQr() {
   const box = $('#qrBox');
   box.innerHTML = '';
@@ -1303,6 +1351,7 @@ function drawQr() {
 function useCode(code) {
   sync.code = code;
   local.set('code', code);
+  codeInUrl(code);
   startSync(code);
   drawQr();
 }
@@ -1351,14 +1400,16 @@ function cleanScript(r) {
   return { id: String(r.id).slice(0, 64), title: String(r.title || '').slice(0, 200), html: String(r.html || ''),
     createdAt: +r.createdAt || 0, updatedAt: +r.updatedAt || 0 };
 }
-function mergeScripts(incoming) {
+function mergeScripts(incoming, live) {
   const prev = current();
   const prevId = prev && prev.id, prevHtml = prev && prev.html, prevTitle = prev && prev.title;
   const map = new Map(S.scripts.map(x => [x.id, x]));
   for (const r of incoming) {
     if (!r || typeof r.id !== 'string') continue;
     const sc = cleanScript(r), have = map.get(sc.id);
-    if (!have || sc.updatedAt > have.updatedAt) map.set(sc.id, sc);
+    if (live && have) sc.updatedAt = Math.max(sc.updatedAt, have.updatedAt + 1);
+    if (live && meta.tomb[sc.id] >= sc.updatedAt) delete meta.tomb[sc.id];
+    if (!have || live || sc.updatedAt > have.updatedAt) map.set(sc.id, sc);
   }
   S.scripts = [...map.values()].filter(x => !(meta.tomb[x.id] >= x.updatedAt)).sort((a, b) => b.createdAt - a.createdAt);
   persist();
@@ -1410,7 +1461,10 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     if (!$('#prompterView').classList.contains('hidden')) requestWakeLock();
     // 아이패드가 잠들었다 깨면 연결이 끊겨 있을 수 있음
-    if (!sync.conns.size || !sync.peer || sync.peer.destroyed || sync.peer.disconnected) startSync(sync.code);
+    const p = sync.peer;
+    if (!p || p.destroyed) startSync(sync.code);
+    else if (p.disconnected) { try { p.reconnect(); } catch { startSync(sync.code); } }
+    else if (sync.role !== 'hub' && !sync.conns.size) startSync(sync.code);
   }
 });
 
@@ -1424,11 +1478,13 @@ applySettings();
 renderPrompter();
 display = currentPos();
 // 연결 코드: 링크(#코드)로 열었으면 그 코드, 아니면 이 기기에 저장된 코드, 없으면 새로 만듦
+// 코드 우선순위: QR/링크의 #코드 → 이 기기에 저장된 코드 → 홈 화면 앱 주소의 ?c=코드 → 새 코드
 const hashCode = cleanCode(location.hash.slice(1));
-let code = hashCode.length === 6 ? hashCode : cleanCode(local.get('code', ''));
-if (code.length !== 6) code = newCode();
+const queryCode = cleanCode(new URLSearchParams(location.search).get('c'));
+const storedCode = cleanCode(local.get('code', ''));
+let code = [hashCode, storedCode, queryCode].find(c => c.length === 6) || newCode();
 local.set('code', code);
-if (hashCode) history.replaceState(null, '', location.pathname + location.search);
+codeInUrl(code);
 showView(local.get('view', isIPad ? 'prompter' : 'editor'));
 S.ready = true;
 requestAnimationFrame(frame);
